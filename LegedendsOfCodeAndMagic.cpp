@@ -41,6 +41,15 @@ public:
 	}
 };
 
+struct ActionPick : public Action {
+	int creatureID;
+public:
+	ActionPick(int creatureID) : creatureID(creatureID) {}
+	virtual void perform(ostream& o) override {
+		cout << "PICK " << creatureID;
+	}
+};
+
 
 struct Card {
 	enum class Location {
@@ -78,7 +87,7 @@ protected:
 	int deckCardsAmount;
 	int rune;
 	int draw;
-	int cardsAmount;
+	
 public:
 
 	Player(istream& i);
@@ -94,6 +103,7 @@ public:
 
 class Me : public Player {
 	vector<Card> hand;
+	int cardsAmount = -1;
 public:
 	Me(istream& i);
 	void GetCards(istream& i);
@@ -104,14 +114,22 @@ public:
 
 int main()
 {
+	int kek = 0;
 	// game loop
 	while (1) {
 		Me m(cin);
 		Opponent p(cin);
 		m.GetCards(cin);
 		
-		cerr << m.ToString() << endl;
-		cout << "PASS" << endl;
+	//	cerr << m.ToString() << endl;
+		if (kek < 30) {
+			cout << "PICK 1"  << endl;
+		}
+		else {
+			cout << "PASS" << endl;
+		}
+		kek++;
+		
 	}
 }
 
@@ -143,7 +161,8 @@ Player::Player(istream& i)
 
 Opponent::Opponent(istream& i) : Player(cin)
 {
-	cin >> handCardsCount >> actionsCount;
+	cin >> handCardsCount >> actionsCount; cin.ignore();
+	cerr << "Opponents Hand amount " << handCardsCount << '\n';
 	for (int i = 0; i < actionsCount; i++) {
 		string cardNumberAndAction;
 		getline(cin, cardNumberAndAction);
@@ -152,15 +171,17 @@ Opponent::Opponent(istream& i) : Player(cin)
 }
 
 Me::Me(istream& i) : Player(cin)
-{
-}
+{}
 
 void Me::GetCards(istream& i)
 {
 	
 	cin >> cardsAmount; cin.ignore();
+	cerr << "Getting cards amount " << cardsAmount << '\n';
 	for (int j = 0; j < cardsAmount; j++) {
-		hand.push_back(Card(i));
+		Card a{ i };
+		cerr << a.ToString() << '\n';
+		hand.push_back(a);
 	}
 }
 

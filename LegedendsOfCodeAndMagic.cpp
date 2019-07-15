@@ -13,6 +13,11 @@ using namespace std;
 //bool operator == (const pair<int ,int > & firstPair, const pair<int, int > & secondPair) {
 //	return firstPair.first == secondPair.first && firstPair.second == secondPair.second;
 //}
+
+namespace GameConstants {
+	const int maxHandCardsAmount = 8;
+	const int maxBoardCardsAmount = 6;
+}
 enum CardNumber {
 	FIRST = 0,
 	SECOND,
@@ -59,6 +64,18 @@ public:
 	}
 };
 
+struct ActionUse: public Action {
+	int spellId;
+	int enemyId;
+public:
+	ActionUse(int spellInstaceId,int enemyInstanceId= -1) : spellId(spellInstaceId), enemyId(enemyInstanceId) {}
+	virtual void perform(ostream& o)const override {
+		cout << "USE " << spellId << " " << enemyId << ";";
+	}
+};
+
+
+
 
 struct Card {
 	enum class Location {
@@ -66,20 +83,35 @@ struct Card {
 		InHand = 0,
 		OnBoard = 1
 	};
-
+	enum class Type {
+		Creature = 0,
+		GreenItem,
+		RedItem,
+		BlueItem
+	};
+	enum Abilities {
+		Breakthrough = 0b00000001,
+		Charge =	   0b00000010,
+		Drain =        0b00000100,
+		Guard =        0b00001000,
+		Lethal =       0b00010000,
+		Ward =         0b00100000
+	};
 	Card(istream& i);
 	int cardId;
 	int instanceId;
 	Location location;
-	int cardType;
+	Type type;
 	int cost;
 	int attack;
 	int defense;
-	string abilities;
+	unsigned int abilities = 0;
 	int myHealthChange;
 	int opponentHealthChange;
 	int cardDraw;
+	bool canAttack = false;
 	string ToString() const;
+
 };
 
 bool operator == (const Card& first, const Card& second) {
@@ -118,19 +150,42 @@ public:
 	inline const vector<Card>& GetBoard() const { return board; };
 };
 
+class Battler {
+private:
+	vector<Card>& myHand;
+	vector<Card>& myBoard;
+	vector<Card>& enemyBoard;
+	vector<Action* > actions;
+	int RemoveEnemyCard(Card& enemyCard);
+	int RemoveMyCard(Card& myCard);
+
+	int GoodEnemyTrade(Card& enemyCard);
+	int GoodMyTrade(Card& myCard);
+	int TradeSomehow(Card& enemyCard);
+
+	Card* FindCardWithSmallestAttack();
+	int BreakEnemyBuble(Card& targetCard);
+	bool CanAttackCard(Card& enemyCard);
+	bool EnemyHasTaunts() const;
+	int AttackFace(Card& myCard);
+public:
+	Battler(vector<Card>& myHand, vector<Card>& mBoard, vector<Card>& oppBoard);
+	void Battle();
+
+};
+
 class Me : public Player {
 	vector<Card> hand;
 	vector<Card> board;
 	vector<Card> opponentsBoardCopy;
-	map<pair<int, int>, vector<Card>> boardCardsByStats;
+	Battler m_Battler;
+
 	int cardsAmount = -1;
 	vector<Action* > actions;
 	void DraftThink();
 	void BattleThink();
 	GameState state = GameState::DRAFT;
-	void CheckForTaunts();
-
-	void Trade(Card & enemyCard);
+	void PlayCards();
 public:
 	Me(istream& i);
 	void GetCards(istream& i,Opponent & op);
@@ -159,18 +214,38 @@ int main()
 Card::Card(istream& i)
 {
 	int nlocation;
-	cin >> cardId >> instanceId >> nlocation >> cardType >>
+	int iCardType;
+	string abs;
+	cin >> cardId >> instanceId >> nlocation >> iCardType >>
 		cost >> attack >> defense >> 
-		abilities >> myHealthChange >> opponentHealthChange
+		abs >> myHealthChange >> opponentHealthChange
 		>> cardDraw; cin.ignore();
 
 	location = static_cast<Card::Location>(nlocation);
+	type = static_cast<Card::Type>(iCardType);
+
+	if (abs.find('B') != string::npos)
+		abilities |= Card::Abilities::Breakthrough;
+	if (abs.find('C') != string::npos)
+		abilities |= Card::Abilities::Charge;
+	if (abs.find('D') != string::npos)
+		abilities |= Card::Abilities::Drain;
+	if (abs.find('G') != string::npos)
+		abilities |= Card::Abilities::Guard;
+	if (abs.find('L') != string::npos)
+		abilities |= Card::Abilities::Lethal;
+	if (abs.find('W') != string::npos)
+		abilities |= Card::Abilities::Ward;
+
+	canAttack = location == Location::OnBoard;
+
+
 }
 
 string Card::ToString() const
 {
 	stringstream s;
-	s << "Card id " << cardId << '\n';
+	s << "Card location " << (int)location << '\n';
 	s << "Card health " << defense << '\n';
 
 	s << "Card attack " << attack << '\n';
@@ -193,7 +268,7 @@ Opponent::Opponent(istream& i) : Player(cin)
 	}
 }
 
-Me::Me(istream& i) : Player(cin)
+Me::Me(istream& i) : Player(cin), m_Battler(hand,board,opponentsBoardCopy)
 {}
 
 void Me::GetCards(istream& i,Opponent & p)
@@ -207,17 +282,8 @@ void Me::GetCards(istream& i,Opponent & p)
 		if (card.location == Card::Location::InHand)
 			hand.push_back(card);
 		else if (card.location == Card::Location::OnBoard) {
-			board.push_back(card);
-			auto it = boardCardsByStats.find(make_pair(card.attack, card.defense));
-			if (it == boardCardsByStats.end()) {
-				boardCardsByStats.insert(make_pair(make_pair(card.attack, card.defense), vector<Card>{card}));
-			}
-			else {
-				it->second.push_back(card);
-			}
-			
+			board.push_back(card);			
 		}
-			
 		else if (card.location == Card::Location::OpponentsBoard) {
 			p.AddCard(card);
 		}
@@ -268,102 +334,237 @@ void Me::SetState(GameState state)
 
 void Me::DraftThink()
 {
+	if (!hand.empty())
+		cerr << "In hand\n";
+	else cerr << "not in hand\n";
+	int i = 0;
+	while (i < 3) {
+		if (hand[i].type != Card::Type::RedItem && hand[i].type != Card::Type::BlueItem) {
+			actions.push_back(new ActionPick((CardNumber)i));
+			return;
+		}
+		i++;
+	}
 	actions.push_back(new ActionPick(FIRST));
 }
 
 void Me::BattleThink()
 {
+	PlayCards();
+	m_Battler.Battle();
+}
 
-	CheckForTaunts();
+void Me::PlayCards() {
+
 	vector<Card> playableCards;
 	copy_if(hand.begin(), hand.end(), back_inserter(playableCards), [&](Card card) {
-		if (card.cost <= mana) {
-			playableCards.push_back(card);
-			mana -= card.cost;
-			return true;
+		if (card.cost == mana) {
+			if (card.type == Card::Type::GreenItem ) {
+				if (!board.empty()) {
+					playableCards.push_back(card);
+					mana -= card.cost;
+					return true;
+				}
+				
+			}
+			else if (card.type == Card::Type::Creature) {
+				playableCards.push_back(card);
+				mana -= card.cost;
+				return true;
+			}			
 		}
 		return false;
 		});
+
+	if (playableCards.empty()) {
+		copy_if(hand.begin(), hand.end(), back_inserter(playableCards), [&](Card card) {
+			if (card.cost <= mana) {
+				if (card.type == Card::Type::GreenItem) {
+					if (!board.empty()) {
+						playableCards.push_back(card);
+						mana -= card.cost;
+						return true;
+					}
+
+				}
+				else if (card.type == Card::Type::Creature) {
+					playableCards.push_back(card);
+					mana -= card.cost;
+					return true;
+				}
+			}
+			return false;
+			});
+	}
 	for_each(playableCards.begin(), playableCards.end(), [&](Card card) {
-		actions.push_back(new ActionSummon(card.instanceId));
+		if (card.type == Card::Type::Creature) {
+			actions.push_back(new ActionSummon(card.instanceId));
+		}
+		else if (card.type == Card::Type::GreenItem) {
+			cerr << "Adding USE action\n";
+			actions.push_back(new ActionUse(card.instanceId, board.front().instanceId));
+		}
 		});
-	for (const auto& card : board) {
-
-		actions.push_back(new ActionAttack(card.instanceId));
-	}
-
-	
-}
-
-void Me::CheckForTaunts()
-{
-	vector<Card> opTaunts;
-	for (auto c : opponentsBoardCopy) {
-		if (c.abilities.find('G') != string::npos) {
-			opTaunts.push_back(c);
-		}
-	}
-
-
-	for (auto& t : opTaunts)
-		Trade(t);
 
 }
 
-void Me::Trade(Card& enemyCard)
+Battler::Battler(vector<Card>& myHand, vector<Card>& mBoard, vector<Card>& oppBoard) :
+	myHand(myHand),myBoard(mBoard),enemyBoard(oppBoard)
 {
-	auto fIt = boardCardsByStats.find(make_pair(enemyCard.defense, enemyCard.attack -1));
-	if (fIt != boardCardsByStats.end()) {
-		Card trade = fIt->second.back();
-		actions.push_back( new ActionAttack(trade.instanceId, enemyCard.instanceId));
-		opponentsBoardCopy.erase(remove(opponentsBoardCopy.begin(), opponentsBoardCopy.end(), enemyCard));
-		board.erase(remove(board.begin(), board.end(), trade));
-		fIt->second.pop_back();
-		return;
-	}
-	vector<Card> bestChoice;
-	for_each(boardCardsByStats.begin(), boardCardsByStats.end(), [&](const  pair<pair<int,int>,vector<Card>> & p) {
-		if (p.first.first >= enemyCard.defense) {
-			for (const auto& card : p.second)
-				bestChoice.push_back(card);
-		}
-	});
+}
 
+void Battler::Battle()
+{
 
-	if (!bestChoice.empty()) {
-		Card* toTrade = nullptr;
-		for (auto card : bestChoice) {
-			if (card.defense > enemyCard.attack) {
-				toTrade=&card;
-				break;
+	if (EnemyHasTaunts()) {
+		for (auto& card : enemyBoard) {
+			if (card.abilities & Card::Abilities::Guard) {
+				GoodEnemyTrade(card);
 			}
 		}
-		if (!toTrade) {
-			for (auto card : bestChoice) {
-				if (card.defense < enemyCard.attack) {
-					toTrade = &card;
-					break;
+		if (EnemyHasTaunts()) {
+			for (auto& card : enemyBoard) {
+				if (card.abilities & Card::Abilities::Guard) {
+					TradeSomehow(card);
 				}
 			}
 		}
-		if (!toTrade) {
-			toTrade = &bestChoice[0];
+	}
+
+	if (!EnemyHasTaunts()) {
+		for (auto& card : enemyBoard) {
+			GoodEnemyTrade(card);
 		}
-		actions.push_back(new ActionAttack(toTrade->instanceId, enemyCard.instanceId));
-		opponentsBoardCopy.erase(remove(opponentsBoardCopy.begin(), opponentsBoardCopy.end(), enemyCard));
-		board.erase(remove(board.begin(), board.end(), *toTrade));
-		
-		auto it = boardCardsByStats.find({ toTrade->attack,toTrade->defense });
-		it->second.erase(remove(it->second.begin(), it->second.end(), *toTrade));
+		for (auto& card : myBoard) {
+			AttackFace(card);
+		}
+	}
+	if (actions.empty()) {
+		auto t = new ActionPass();
+		t->perform(cout);
+		delete t;
 		return;
 	}
+	for (auto* action : actions) {
+		action->perform(cout);
+		delete action;
+	}
+}
 
 
-	for (auto card : board) {
-		actions.push_back(new ActionAttack(card.instanceId, enemyCard.instanceId));
-		enemyCard.defense -= card.attack;
-		if (enemyCard.defense <= 0) {
-			return;
+int Battler::RemoveEnemyCard(Card& enemyCard)
+{
+	enemyBoard.erase(remove(enemyBoard.begin(), enemyBoard.end(), enemyCard));
+	return 1;
+}
+
+int Battler::RemoveMyCard(Card& myCard)
+{
+	myBoard.erase(remove(myBoard.begin(), myBoard.end(), myCard));
+	return 1;
+}
+
+int Battler::GoodEnemyTrade(Card& enemyCard)
+{
+	if(enemyCard.abilities & Card::Abilities::Ward)
+		BreakEnemyBuble(enemyCard);
+
+	vector<int> cardsAttackDiff;
+	int min = 0;
+	for (int i = 0; i < myBoard.size();++i) {
+		if (enemyCard.defense - myBoard[i].attack <= min) 
+			cardsAttackDiff.push_back(i);
+		
+	}
+	Card* bestCard = nullptr;
+	for (int i = 0; i < cardsAttackDiff.size(); ++i) {
+		auto& currCard = myBoard[cardsAttackDiff[i]];
+		if (enemyCard.attack < currCard.defense) {
+			bestCard = &currCard;
 		}
 	}
+	if (bestCard) {
+		RemoveEnemyCard(enemyCard);
+		actions.push_back(new ActionAttack(bestCard->instanceId, enemyCard.instanceId));
+	}
+	return bestCard ? 1 : 0;
+}
+
+int Battler::GoodMyTrade(Card& myCard)
+{
+	return 0;
+}
+
+int Battler::TradeSomehow(Card& enemyCard)
+{
+	if (enemyCard.abilities & Card::Abilities::Ward)
+		BreakEnemyBuble(enemyCard);
+	vector<int> attackedIndexes;
+	for (auto& c : myBoard) {
+		actions.push_back(new ActionAttack(c.instanceId, enemyCard.instanceId));
+		enemyCard.defense -= c.attack;
+		c.defense -= enemyCard.attack;
+		if (c.defense <= 0) {
+			RemoveMyCard(c);
+		}
+		if (enemyCard.defense <= 0) {
+			RemoveEnemyCard(enemyCard);
+		}
+	}
+	return 0;
+}
+
+Card * Battler::FindCardWithSmallestAttack()
+{
+	if (myBoard.empty()) {
+		return nullptr;
+	}
+	Card* res = nullptr;
+	int smallestAttack = 100;
+	int smallestHealth = 100;
+	for (auto& card : myBoard) {
+		if (card.attack < smallestAttack && card.defense < smallestHealth) {
+			res = &card;
+			smallestAttack = card.attack;
+			smallestHealth = card.defense;
+		}	
+	}
+	return res;
+}
+
+int Battler::BreakEnemyBuble(Card& targetCard)
+{
+	Card* wekestCard = FindCardWithSmallestAttack();
+	if (wekestCard && CanAttackCard(targetCard)) {
+		actions.push_back(new ActionAttack(wekestCard->instanceId, targetCard.instanceId));
+		if (wekestCard->defense <= targetCard.attack)
+			RemoveMyCard(*wekestCard);
+		return 1;
+	}
+	return 0;
+}
+
+bool Battler::CanAttackCard(Card& enemyCard)
+{
+	if (enemyCard.abilities & Card::Abilities::Guard)
+		return true;
+
+	return EnemyHasTaunts();
+}
+
+bool Battler::EnemyHasTaunts() const
+{
+	for (const auto& card : enemyBoard) 
+		if (card.abilities & Card::Abilities::Guard)
+			return true;
+	
+	return false;
+}
+
+int Battler::AttackFace(Card& myCard) 
+{
+	if(myCard.canAttack) 
+		actions.push_back(new ActionAttack(myCard.instanceId));
+	myCard.canAttack = false;
+	return !myCard.canAttack;
 }

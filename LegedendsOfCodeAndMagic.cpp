@@ -6,6 +6,7 @@
 #include<map>
 #include<set>
 #include<numeric>
+#include<cassert>
 using namespace std;
 
 /**
@@ -20,7 +21,7 @@ using namespace std;
 namespace GameConstants {
 	const int maxHandCardsAmount = 8;
 	const int maxBoardCardsAmount = 6;
-	const int GoodCurve = 4;
+	const int GoodCurve = 6;
 }
 
 enum CardNumber {
@@ -128,7 +129,7 @@ enum class GameState {
 	BATTLE
 };
 
-
+float calcCardValue(Card& c);
 
 
 class Player {
@@ -194,7 +195,7 @@ class Me : public Player {
 
 	Drafter m_Drafter;
 	int cardsAmount = -1;
-	vector<Action* > actions;
+
 	void DraftThink();
 	void BattleThink();
 	GameState state = GameState::DRAFT;
@@ -271,7 +272,7 @@ Player::Player(istream& i)
 Opponent::Opponent(istream& i) : Player(cin)
 {
 	cin >> handCardsCount >> actionsCount; cin.ignore();
-	cerr << "Opponents Hand amount " << handCardsCount << '\n';
+
 	for (int i = 0; i < actionsCount; i++) {
 		string cardNumberAndAction;
 		getline(cin, cardNumberAndAction);
@@ -289,10 +290,10 @@ void Me::GetCards(istream& i,Opponent & p)
 {
 	
 	cin >> cardsAmount; cin.ignore();
-	cerr << "Getting cards amount " << cardsAmount << '\n';
+
 	for (int j = 0; j < cardsAmount; j++) {
 		Card card{ i };
-		cerr << card.ToString() << '\n';
+
 		if (card.location == Card::Location::InHand)
 			hand.push_back(card);
 		else if (card.location == Card::Location::OnBoard) {
@@ -353,19 +354,19 @@ void Me::BattleThink()
 void Me::PlayCards() {
 
 	vector<Card> playableCards;
+
 	copy_if(hand.begin(), hand.end(), back_inserter(playableCards), [&](Card card) {
-		if (card.cost <= mana && card.location == Card::Location::InHand) {
+		assert(card.location == Card::Location::InHand);
+
+		if (card.cost <= mana) {
 			if (card.type == Card::Type::GreenItem ) {
 				if (!board.empty()) {
-					playableCards.push_back(card);
 					mana -= card.cost;
 					card.location = Card::Location::OnBoard;
 					return true;
 				}
-				
 			}
 			else if (card.type == Card::Type::Creature) {
-				playableCards.push_back(card);
 				mana -= card.cost;
 				card.location = Card::Location::OnBoard;
 				return true;
@@ -375,9 +376,8 @@ void Me::PlayCards() {
 		});
 
 	
-	cerr << "Playable " << playableCards.size() << "\n";
+
 	for(Card & card : playableCards) {
-		cerr << (int)card.type << '\n';
 		if (card.type == Card::Type::Creature) {
 			auto a = new ActionSummon(card.instanceId);
 			a->perform(cout);
@@ -385,9 +385,10 @@ void Me::PlayCards() {
 			
 		}
 		else if (card.type == Card::Type::GreenItem) {
-			cerr << "Adding USE action\n";
 			auto a = new ActionUse(card.instanceId, board.front().instanceId);
 			a->perform(cout);
+			board.front().attack += card.attack;
+			board.front().defense += card.defense;
 			delete a;
 		}
 	}
@@ -400,30 +401,36 @@ Battler::Battler(vector<Card>& myHand, vector<Card>& mBoard, vector<Card>& oppBo
 
 void Battler::Battle()
 {
-
+	cerr << "Enemy " << (EnemyHasTaunts() ? " has " : " have not ") << "taunts\n";
 	if (EnemyHasTaunts()) {
 		for (auto& card : enemyBoard) {
 			if (card.abilities & Card::Abilities::Guard) {
 				GoodEnemyTrade(card);
 			}
 		}
-		if (EnemyHasTaunts()) {
-			for (auto& card : enemyBoard) {
-				if (card.abilities & Card::Abilities::Guard) {
-					TradeSomehow(card);
-				}
+		
+	}
+	if (EnemyHasTaunts())
+	{
+		for (auto& card : enemyBoard) {
+			if (card.abilities & Card::Abilities::Guard) {
+				TradeSomehow(card);
 			}
 		}
 	}
 
-	if (!EnemyHasTaunts()) {
-		for (auto& card : enemyBoard) {
-			GoodEnemyTrade(card);
+
+	
+	for (auto& card : enemyBoard) {
+		if (card.abilities & Card::Abilities::Ward) {
+			BreakEnemyBuble(card);
 		}
-		for (auto& card : myBoard) {
-			AttackFace(card);
-		}
-	} 
+		GoodEnemyTrade(card);
+	}
+	for (auto& card : myBoard) {
+		AttackFace(card);
+	}
+	
 	if (actions.empty()) {
 		cerr << "NO ACTIONS??\n";
 		auto t = new ActionPass();
@@ -452,31 +459,42 @@ int Battler::RemoveMyCard(Card& myCard)
 
 int Battler::GoodEnemyTrade(Card& enemyCard)
 {
+	cerr << "In good enemy trade enemy card id " << enemyCard.instanceId << '\n';
 	if(enemyCard.abilities & Card::Abilities::Ward)
 		BreakEnemyBuble(enemyCard);
 
-	vector<int> cardsAttackDiff;
+	vector<int> goodCardIndx;
 	int min = 0;
 	for (int i = 0; i < myBoard.size();++i) {
-		if (!myBoard[i].canAttack)
-			continue;
-		if (enemyCard.defense - myBoard[i].attack <= min) 
-			cardsAttackDiff.push_back(i);
+		if (myBoard[i].canAttack) {
+			if (enemyCard.defense - myBoard[i].attack <= min)
+				goodCardIndx.push_back(i);
+		}
+			
+	
 		
 	}
 	Card* bestCard = nullptr;
-	for (int i = 0; i < cardsAttackDiff.size(); ++i) {
-		auto& currCard = myBoard[cardsAttackDiff[i]];
-		if (!currCard.canAttack)
-			continue;
-		if (enemyCard.attack < currCard.defense) {
-			bestCard = &currCard;
-		}
+	
+	for (int i = 0; i < goodCardIndx.size(); ++i) {
+		auto& currCard = myBoard[goodCardIndx[i]];
+		if (currCard.canAttack)
+			if (enemyCard.attack < currCard.defense) {
+				bestCard = &currCard;
+			}
+			else if ((enemyCard.defense - currCard.defense )>= 3) {
+				bestCard = &currCard;
+			}
+		
 	}
+
+
 	if (bestCard) {
-		RemoveEnemyCard(enemyCard);
+		
 		actions.push_back(new ActionAttack(bestCard->instanceId, enemyCard.instanceId));
+		cerr << "Traded card " << enemyCard.instanceId << "By card " << bestCard->instanceId << '\n';
 		bestCard->canAttack = false;
+		RemoveEnemyCard(enemyCard);
 	}
 	return bestCard ? 1 : 0;
 }
@@ -533,6 +551,8 @@ Card * Battler::FindCardWithSmallestAttack()
 int Battler::BreakEnemyBuble(Card& targetCard)
 {
 	Card* wekestCard = FindCardWithSmallestAttack();
+	if (wekestCard->attack > 2)
+		return 0;
 	if (wekestCard && CanAttackCard(targetCard)) {
 		actions.push_back(new ActionAttack(wekestCard->instanceId, targetCard.instanceId));
 		wekestCard->canAttack = false;
@@ -570,46 +590,68 @@ int Battler::AttackFace(Card& myCard)
 
 void Drafter::MakeChoice()
 {
-	int i = 0;
-	if (!byCurve.empty()) {
-		int sum = 0;
-		for_each(byCurve.begin(), byCurve.end(), [&](const pair<int,int>& p) {
-			sum += p.first * p.second;
-			});
-		float average = (float)sum / byCurve.size();
-		int k = 0;
-		float min = 100;
-		for (auto card : hand) {
-			if (card.type == Card::Type::BlueItem || card.type == Card::Type::RedItem) {
-				i++;
-				continue;
-			}
-				
+	int cartToPlayIndex = 0;
 
-			float diff = abs(GameConstants::GoodCurve - (float)card.cost);
-			if (diff < min) {
-				min = diff;
-				k = i;
-				i++;
-			}
+	float bigger = 0.0;
+	
+	for (int j = 0; j < hand.size();++j) {
+		float currValue = calcCardValue(hand[j]);
+		cerr << "Card id " << hand[j].cardId << " value " << currValue << '\n';
+		if (currValue > bigger) {
+			bigger = currValue;
+			cartToPlayIndex = j;
 		}
+	}
 
-		auto a = new ActionPick((CardNumber)k);
-		a->perform(cout);
-		delete a;
+	auto a = new ActionPick((CardNumber)cartToPlayIndex);
+	a->perform(cout);
+	delete a;
+	
+}
 
+float calcCardValue(Card& c)
+{
+	//TODO MAKE IN CLASS; AND MAP WITH ABILITIES SCALE
+	const static std::set<Card::Abilities> allAbilities = {
+		Card::Abilities::Breakthrough,
+		Card::Abilities::Charge,
+		Card::Abilities::Drain,
+		Card::Abilities::Guard,
+		Card::Abilities::Lethal,
+		Card::Abilities::Ward };
+
+	float value = 0.f;
+	if (c.cost == 0 || c.attack == 0)
+		return value;
+	float attackCoff = c.attack / c.cost;
+	float defenseCoff = c.defense / c.cost;
+
+	value += attackCoff;
+	value += defenseCoff;
+	float statsDiff = abs(c.attack- c.defense);
+	if (statsDiff > 5 && c.cost < 8) {
+		value -= 4.f;
+	}
+	if (statsDiff) {
+		value += 1.5f / statsDiff;
 	}
 	else {
-		auto a = new ActionPick(FIRST);
-		a->perform(cout);
-		delete a;
+		value += 1.f;
 	}
-
-	auto it = byCurve.find(i);
-	if (it == byCurve.end()) {
-		byCurve.insert({ hand[i].cost,1 });
+	for (const auto& ability : allAbilities) {
+		if (c.abilities & ability)
+			value += (0.2 * c.cost);
+	}
+	int curve = abs(GameConstants::GoodCurve - c.cost);
+	if (curve) {
+		value += 7.f / curve;
 	}
 	else {
-		it->second++;
+		value += 6.5f;
 	}
+	if (c.cost < 3) {
+		value -= 4.f;
+	}
+	value += c.cost * 0.2;
+	return value;
 }

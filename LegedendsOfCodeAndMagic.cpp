@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <sstream>
 #include<map>
+#include<set>
+#include<numeric>
 using namespace std;
 
 /**
@@ -14,10 +16,13 @@ using namespace std;
 //	return firstPair.first == secondPair.first && firstPair.second == secondPair.second;
 //}
 
+
 namespace GameConstants {
 	const int maxHandCardsAmount = 8;
 	const int maxBoardCardsAmount = 6;
+	const int GoodCurve = 4;
 }
+
 enum CardNumber {
 	FIRST = 0,
 	SECOND,
@@ -149,7 +154,13 @@ public:
 	inline void AddCard(Card c) { board.push_back(c); }
 	inline const vector<Card>& GetBoard() const { return board; };
 };
-
+class Drafter {
+	vector<Card>& hand;
+	
+public:
+	Drafter(vector<Card>& h) : hand(h) {}
+	void MakeChoice();
+};
 class Battler {
 private:
 	vector<Card>& myHand;
@@ -179,7 +190,9 @@ class Me : public Player {
 	vector<Card> board;
 	vector<Card> opponentsBoardCopy;
 	Battler m_Battler;
+	
 
+	Drafter m_Drafter;
 	int cardsAmount = -1;
 	vector<Action* > actions;
 	void DraftThink();
@@ -196,18 +209,16 @@ public:
 
 
 
+map<int, int> byCurve;
+map<Card::Type, int> byType;
 int main()
 {
-	int kek = 0;
 	// game loop
 	while (1) {
 		Me m(cin);
 		Opponent p(cin);
 		m.GetCards(cin,p);
-		m.SetState(kek < 30 ? GameState::DRAFT : GameState::BATTLE);
-		m.MakeTurn();
-		kek++;
-		
+		m.MakeTurn();		
 	}
 }
 
@@ -268,8 +279,11 @@ Opponent::Opponent(istream& i) : Player(cin)
 	}
 }
 
-Me::Me(istream& i) : Player(cin), m_Battler(hand,board,opponentsBoardCopy)
-{}
+Me::Me(istream& i) : Player(cin), m_Battler(hand,board,opponentsBoardCopy),m_Drafter(hand)
+{
+	state = mana ? GameState::BATTLE : GameState::DRAFT;
+
+}
 
 void Me::GetCards(istream& i,Opponent & p)
 {
@@ -314,15 +328,7 @@ void Me::MakeTurn()
 	if (state == GameState::DRAFT)
 		DraftThink();
 	else BattleThink();
-	if (actions.empty()) {
-		auto* a = new ActionPass();
-		a->perform(cout);
-		delete a;
-	}
-	for (const auto& action : actions) {
-		action->perform(cout); 
-		delete action;
-	}
+
 	cout << "\n";
 
 }
@@ -334,22 +340,12 @@ void Me::SetState(GameState state)
 
 void Me::DraftThink()
 {
-	if (!hand.empty())
-		cerr << "In hand\n";
-	else cerr << "not in hand\n";
-	int i = 0;
-	while (i < 3) {
-		if (hand[i].type != Card::Type::RedItem && hand[i].type != Card::Type::BlueItem) {
-			actions.push_back(new ActionPick((CardNumber)i));
-			return;
-		}
-		i++;
-	}
-	actions.push_back(new ActionPick(FIRST));
+	m_Drafter.MakeChoice();
 }
 
 void Me::BattleThink()
 {
+	
 	PlayCards();
 	m_Battler.Battle();
 }
@@ -358,11 +354,12 @@ void Me::PlayCards() {
 
 	vector<Card> playableCards;
 	copy_if(hand.begin(), hand.end(), back_inserter(playableCards), [&](Card card) {
-		if (card.cost == mana) {
+		if (card.cost <= mana && card.location == Card::Location::InHand) {
 			if (card.type == Card::Type::GreenItem ) {
 				if (!board.empty()) {
 					playableCards.push_back(card);
 					mana -= card.cost;
+					card.location = Card::Location::OnBoard;
 					return true;
 				}
 				
@@ -370,42 +367,30 @@ void Me::PlayCards() {
 			else if (card.type == Card::Type::Creature) {
 				playableCards.push_back(card);
 				mana -= card.cost;
+				card.location = Card::Location::OnBoard;
 				return true;
 			}			
 		}
 		return false;
 		});
 
-	if (playableCards.empty()) {
-		copy_if(hand.begin(), hand.end(), back_inserter(playableCards), [&](Card card) {
-			if (card.cost <= mana) {
-				if (card.type == Card::Type::GreenItem) {
-					if (!board.empty()) {
-						playableCards.push_back(card);
-						mana -= card.cost;
-						return true;
-					}
-
-				}
-				else if (card.type == Card::Type::Creature) {
-					playableCards.push_back(card);
-					mana -= card.cost;
-					return true;
-				}
-			}
-			return false;
-			});
-	}
-	for_each(playableCards.begin(), playableCards.end(), [&](Card card) {
+	
+	cerr << "Playable " << playableCards.size() << "\n";
+	for(Card & card : playableCards) {
+		cerr << (int)card.type << '\n';
 		if (card.type == Card::Type::Creature) {
-			actions.push_back(new ActionSummon(card.instanceId));
+			auto a = new ActionSummon(card.instanceId);
+			a->perform(cout);
+			delete a;
+			
 		}
 		else if (card.type == Card::Type::GreenItem) {
 			cerr << "Adding USE action\n";
-			actions.push_back(new ActionUse(card.instanceId, board.front().instanceId));
+			auto a = new ActionUse(card.instanceId, board.front().instanceId);
+			a->perform(cout);
+			delete a;
 		}
-		});
-
+	}
 }
 
 Battler::Battler(vector<Card>& myHand, vector<Card>& mBoard, vector<Card>& oppBoard) :
@@ -438,8 +423,9 @@ void Battler::Battle()
 		for (auto& card : myBoard) {
 			AttackFace(card);
 		}
-	}
+	} 
 	if (actions.empty()) {
+		cerr << "NO ACTIONS??\n";
 		auto t = new ActionPass();
 		t->perform(cout);
 		delete t;
@@ -472,6 +458,8 @@ int Battler::GoodEnemyTrade(Card& enemyCard)
 	vector<int> cardsAttackDiff;
 	int min = 0;
 	for (int i = 0; i < myBoard.size();++i) {
+		if (!myBoard[i].canAttack)
+			continue;
 		if (enemyCard.defense - myBoard[i].attack <= min) 
 			cardsAttackDiff.push_back(i);
 		
@@ -479,6 +467,8 @@ int Battler::GoodEnemyTrade(Card& enemyCard)
 	Card* bestCard = nullptr;
 	for (int i = 0; i < cardsAttackDiff.size(); ++i) {
 		auto& currCard = myBoard[cardsAttackDiff[i]];
+		if (!currCard.canAttack)
+			continue;
 		if (enemyCard.attack < currCard.defense) {
 			bestCard = &currCard;
 		}
@@ -486,6 +476,7 @@ int Battler::GoodEnemyTrade(Card& enemyCard)
 	if (bestCard) {
 		RemoveEnemyCard(enemyCard);
 		actions.push_back(new ActionAttack(bestCard->instanceId, enemyCard.instanceId));
+		bestCard->canAttack = false;
 	}
 	return bestCard ? 1 : 0;
 }
@@ -497,11 +488,15 @@ int Battler::GoodMyTrade(Card& myCard)
 
 int Battler::TradeSomehow(Card& enemyCard)
 {
+	cerr << "in trade somehow " << enemyCard.instanceId << "\n";
 	if (enemyCard.abilities & Card::Abilities::Ward)
 		BreakEnemyBuble(enemyCard);
 	vector<int> attackedIndexes;
 	for (auto& c : myBoard) {
+		if (!c.canAttack)
+			continue;
 		actions.push_back(new ActionAttack(c.instanceId, enemyCard.instanceId));
+		c.canAttack = false;
 		enemyCard.defense -= c.attack;
 		c.defense -= enemyCard.attack;
 		if (c.defense <= 0) {
@@ -509,6 +504,7 @@ int Battler::TradeSomehow(Card& enemyCard)
 		}
 		if (enemyCard.defense <= 0) {
 			RemoveEnemyCard(enemyCard);
+			return 1;
 		}
 	}
 	return 0;
@@ -523,6 +519,8 @@ Card * Battler::FindCardWithSmallestAttack()
 	int smallestAttack = 100;
 	int smallestHealth = 100;
 	for (auto& card : myBoard) {
+		if (!card.canAttack)
+			continue;
 		if (card.attack < smallestAttack && card.defense < smallestHealth) {
 			res = &card;
 			smallestAttack = card.attack;
@@ -537,6 +535,7 @@ int Battler::BreakEnemyBuble(Card& targetCard)
 	Card* wekestCard = FindCardWithSmallestAttack();
 	if (wekestCard && CanAttackCard(targetCard)) {
 		actions.push_back(new ActionAttack(wekestCard->instanceId, targetCard.instanceId));
+		wekestCard->canAttack = false;
 		if (wekestCard->defense <= targetCard.attack)
 			RemoveMyCard(*wekestCard);
 		return 1;
@@ -567,4 +566,50 @@ int Battler::AttackFace(Card& myCard)
 		actions.push_back(new ActionAttack(myCard.instanceId));
 	myCard.canAttack = false;
 	return !myCard.canAttack;
+}
+
+void Drafter::MakeChoice()
+{
+	int i = 0;
+	if (!byCurve.empty()) {
+		int sum = 0;
+		for_each(byCurve.begin(), byCurve.end(), [&](const pair<int,int>& p) {
+			sum += p.first * p.second;
+			});
+		float average = (float)sum / byCurve.size();
+		int k = 0;
+		float min = 100;
+		for (auto card : hand) {
+			if (card.type == Card::Type::BlueItem || card.type == Card::Type::RedItem) {
+				i++;
+				continue;
+			}
+				
+
+			float diff = abs(GameConstants::GoodCurve - (float)card.cost);
+			if (diff < min) {
+				min = diff;
+				k = i;
+				i++;
+			}
+		}
+
+		auto a = new ActionPick((CardNumber)k);
+		a->perform(cout);
+		delete a;
+
+	}
+	else {
+		auto a = new ActionPick(FIRST);
+		a->perform(cout);
+		delete a;
+	}
+
+	auto it = byCurve.find(i);
+	if (it == byCurve.end()) {
+		byCurve.insert({ hand[i].cost,1 });
+	}
+	else {
+		it->second++;
+	}
 }

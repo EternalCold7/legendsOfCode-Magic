@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <sstream>
 #include <vector>
 #include <algorithm>
 #include <sstream>
@@ -8,9 +9,10 @@
 #include<numeric>
 #include<cassert>
 #include<chrono>
+#include<functional>
 using namespace std;
 using namespace std::chrono;
-
+class NoImplementedError {};
 /**
  * Auto-generated code below aims at helping you parse
  * the standard input according to the problem statement.
@@ -27,34 +29,69 @@ namespace GameConstants {
 	const int maxHandCardsAmount = 8;
 	const int maxBoardCardsAmount = 6;
 	const int GoodCurve = 6;
+	const float FaceAttackVal = 2.f;
 }
 
-enum CardNumber {
-	FIRST = 0,
-	SECOND,
-	THIRD
-};
+
 class Action {
+
+protected:
+	Action(int Cost) : Cost(Cost) {};
+	float value = 0;
+	int Cost = 0;
 public:
-	void Attack(int instanceIdAttacker, int instanceIdEnemy = -1) const {
-		cout << "ATTACK " << instanceIdAttacker << " " << instanceIdEnemy << ";";
-	}
-	void Summon(int pCreatureID) const {
-		cout << "SUMMON " << pCreatureID << ";";
-	}
-	void Pick(int cardNumber) const {
-		cout << "PICK " << cardNumber;
-	}
-	void Use(int spellInstaceId, int enemyInstanceId = -1) const {
-		cout << "USE " << spellInstaceId << " " << enemyInstanceId << ";";
-	}
-	void Pass() const {
-		cout << "PASS" << ";";
-	}
+	
+	int GetCost() const { return Cost; }
+	int GetValue() const { return value; }
+	virtual void Perform(ostream& s) const = 0;
+
+};
+
+class SummonAction : public Action {
+private:
+	const Card* summonCard;
+public:
+	SummonAction(const Card* card);
+	virtual void Perform(ostream& s) const override;
+};
+
+class AttackAction : public Action {
+private:
+	const Card* myCard;
+	const Card* enemyCard;
+public:
+	AttackAction(const Card* myCard, const Card* enemyCard = nullptr);
+	virtual void Perform(ostream& s)const override;
 };
 
 
+class PickAction : public Action {
+	int cardNum;
+public:
+	PickAction(int cardNumber) :Action(0), cardNum(cardNumber) {}
+	virtual void Perform(ostream& s)const override;
+};
 
+class UseAction : public Action {
+private:
+	const Card* myCard;
+	const Card* target;
+public:
+	UseAction(const Card* myCard, const Card* enemyCard = nullptr);
+	virtual void Perform(ostream& s)const override;
+};
+
+class PassAction : public Action {
+public:
+	PassAction() = default;
+	virtual void Perform(ostream& s)const override;
+};
+class ComplicatedAction :public Action {
+	vector<Action* > subActions;
+public:
+	ComplicatedAction(Action* first, Action* second);
+	virtual void Perform(ostream& s)const override;
+ };
 
 
 struct Card {
@@ -94,6 +131,30 @@ struct Card {
 
 };
 
+
+class Calculator {
+	const std::map<Card::Abilities, float> allAbilities = {
+		{Card::Abilities::Breakthrough,0.3f},
+	{Card::Abilities::Charge,0.7f},
+	{Card::Abilities::Drain,0.3f},
+	{Card::Abilities::Guard,1.f},
+	{Card::Abilities::Lethal,1.2f},
+	{Card::Abilities::Ward,1.5f} };
+	
+	map<Card::Type, function<float(const Card&)>> valueCalcFunctions;
+	map<Card::Type, function<float(const Card&)>> powerCalcFunctions;
+	map<Card::Type, function<float(const Action&)>> actionCalcFunctions;
+	
+public:
+	float CalcCardValue(const Card& card) const;
+	float CalcCardPower(const Card& card) const;
+	float CalcActionValue(const Action& action) const { return 0.f; };
+	Calculator();
+};
+
+
+
+
 bool operator == (const Card& first, const Card& second) {
 	return first.instanceId == second.instanceId;
 }
@@ -103,7 +164,6 @@ enum class GameState {
 	BATTLE
 };
 
-float calcCardValue(Card& c);
 
 
 class Player {
@@ -122,50 +182,53 @@ public:
 	Player() = default;
 };
 
-class Drafter {
-	vector<Card>& hand;
 
-public:
-	Drafter(vector<Card>& h) : hand(h) {}
-	void MakeChoice();
-};
 
 class State {
-	Player players[2];
+	
+
 	GameState state;
+	Player players[2];
 	vector<Card> myHand;
 	vector<Card> myBoard;
 	vector<Card> enemyBoard;
-	Drafter m_Drafter;
 
-
-
+	vector<const Card*> GetEnemyTaunts() const;
+	vector<const Card*> GetSpells() const;
+	
+public:
+	inline GameState GetState() const { return state; }
+	vector<Action*> GetAllPosibleActions() const;
 	int RemoveEnemyCard(Card& enemyCard);
 	int RemoveMyCard(Card& myCard);
 
-	int GoodEnemyTrade(Card& enemyCard);
-	int GoodMyTrade(Card& myCard);
-	int TradeSomehow(Card& enemyCard);
+	inline const vector<Card>& GetMyHand() const { return myHand; }
 
-	Card* FindCardWithSmallestAttack();
-	int BreakEnemyBuble(Card& targetCard);
-	bool CanAttackCard(Card& enemyCard);
-	bool EnemyHasTaunts() const;
-	int AttackFace(Card& myCard);
-public:
-	void Battle();
 	State(istream& i);
+};
+
+
+class Agent {
+
+	struct DNA {
+		int Fitness;
+		Action* action;
+	};
+	State m_State;
+	GameState m_GameState;
+	float Fitness(const Action * action);
+	void Draft();
+public:
+	Agent(istream& a);
 	void Think();
 };
 
-map<int, int> byCurve;
-map<Card::Type, int> byType;
 int main()
 {
 	while (1) {
 		high_resolution_clock::time_point p1 = high_resolution_clock::now();
 		State s(cin);
-		s.Think();
+	
 		high_resolution_clock::time_point p2 = high_resolution_clock::now();
 		cerr << "Turn time " << duration_cast<milliseconds>(p2 - p1).count() << '\n';
 	}
@@ -219,43 +282,81 @@ Player::Player(istream& i)
 
 
 
+vector<const Card*> State::GetEnemyTaunts() const {
+	vector<const Card*> enemyTaunts;
+	for (const auto& card : enemyBoard)
+		if (card.abilities & Card::Abilities::Guard)
+			enemyTaunts.push_back(&card);
 
-void State::Battle()
-{
-	cerr << "Enemy " << (EnemyHasTaunts() ? " has " : " have not ") << "taunts\n";
-	if (EnemyHasTaunts()) {
-		for (auto& card : enemyBoard) {
-			if (card.abilities & Card::Abilities::Guard) {
-				GoodEnemyTrade(card);
-			}
-		}
-
-	}
-	if (EnemyHasTaunts())
-	{
-		for (auto& card : enemyBoard) {
-			if (card.abilities & Card::Abilities::Guard) {
-				TradeSomehow(card);
-			}
-		}
-	}
-
-
-
-	for (auto& card : enemyBoard) {
-		if (card.abilities & Card::Abilities::Ward) {
-			BreakEnemyBuble(card);
-		}
-		GoodEnemyTrade(card);
-	}
-	for (auto& card : myBoard) {
-		AttackFace(card);
-	}
-	Action a;
-	a.Pass();	
-
+	return enemyTaunts;
 }
 
+vector<const Card*> State::GetSpells() const
+{
+
+	vector<const Card*> spells;
+	for (const auto& card : myHand) {
+		if (card.type == Card::Type::BlueItem ||
+			card.type == Card::Type::RedItem ||
+			card.type == Card::Type::GreenItem) {
+			spells.push_back(&card);
+		}
+	}
+	return spells;
+}
+
+vector<Action*> State::GetAllPosibleActions() const
+{
+	vector<Action*> outActions;
+	auto taunts = GetEnemyTaunts();
+	if (!taunts.empty()) {
+		
+		for (const auto& card : myBoard) {
+			if (!card.canAttack)
+				continue;
+			for (const auto& enemyTaunt : taunts) {
+				outActions.push_back(new AttackAction(&card, enemyTaunt));
+			}
+
+		}
+	}
+
+	else {
+		for (const auto& card : myBoard) {
+			if (!card.canAttack)
+				continue;
+
+			outActions.push_back(new AttackAction(&card));
+			for (const auto& enemyCard : enemyBoard) {
+				outActions.push_back(new AttackAction(&card, &enemyCard));
+			}
+
+		}
+	}
+
+	for (const auto& spell : GetSpells()) {
+		if (spell->type == Card::Type::GreenItem) {
+			for (const auto& myCard : myBoard) {
+				outActions.push_back(new UseAction(spell,&myCard));
+			}
+		}
+		else {
+			for (const auto& enemyCard : enemyBoard) {
+				outActions.push_back(new UseAction(spell, &enemyCard));
+			}
+		}
+	}
+	for (const auto& card : myHand) {
+		if (card.type == Card::Type::Creature && card.cost <= players[Me].GetMana()) {
+			outActions.push_back(new SummonAction(&card));
+		}
+	}
+
+
+	
+
+	return outActions;
+}
 
 int State::RemoveEnemyCard(Card& enemyCard)
 {
@@ -269,207 +370,7 @@ int State::RemoveMyCard(Card& myCard)
 	return 1;
 }
 
-int State::GoodEnemyTrade(Card& enemyCard)
-{
-	cerr << "In good enemy trade enemy card id " << enemyCard.instanceId << '\n';
-	if (enemyCard.abilities & Card::Abilities::Ward)
-		BreakEnemyBuble(enemyCard);
-
-	vector<int> goodCardIndx;
-	int min = 0;
-	for (int i = 0; i < myBoard.size(); ++i) {
-		if (myBoard[i].canAttack) {
-			if (enemyCard.defense - myBoard[i].attack <= min)
-				goodCardIndx.push_back(i);
-		}
-
-
-
-	}
-	Card* bestCard = nullptr;
-
-	for (int i = 0; i < goodCardIndx.size(); ++i) {
-		auto& currCard = myBoard[goodCardIndx[i]];
-		if (currCard.canAttack)
-			if (enemyCard.attack < currCard.defense) {
-				bestCard = &currCard;
-			}
-			else if ((enemyCard.defense - currCard.defense) >= 3) {
-				bestCard = &currCard;
-			}
-
-	}
-
-	Action a;
-	if (bestCard) {
-
-		a.Attack(bestCard->instanceId, enemyCard.instanceId);
-		cerr << "Traded card " << enemyCard.instanceId << "By card " << bestCard->instanceId << '\n';
-		bestCard->canAttack = false;
-		RemoveEnemyCard(enemyCard);
-	}
-	return bestCard ? 1 : 0;
-}
-
-int State::GoodMyTrade(Card& myCard)
-{
-	return 0;
-}
-
-int State::TradeSomehow(Card& enemyCard)
-{
-	cerr << "in trade somehow " << enemyCard.instanceId << "\n";
-	if (enemyCard.abilities & Card::Abilities::Ward)
-		BreakEnemyBuble(enemyCard);
-	vector<int> attackedIndexes;
-	for (auto& c : myBoard) {
-		if (!c.canAttack)
-			continue;
-		Action a;
-		a.Attack(c.instanceId, enemyCard.instanceId);
-		c.canAttack = false;
-		enemyCard.defense -= c.attack;
-		c.defense -= enemyCard.attack;
-		if (c.defense <= 0) {
-			RemoveMyCard(c);
-		}
-		if (enemyCard.defense <= 0) {
-			RemoveEnemyCard(enemyCard);
-			return 1;
-		}
-	}
-	return 0;
-}
-
-Card* State::FindCardWithSmallestAttack()
-{
-	if (myBoard.empty()) {
-		return nullptr;
-	}
-	Card* res = nullptr;
-	int smallestAttack = 100;
-	int smallestHealth = 100;
-	for (auto& card : myBoard) {
-		if (!card.canAttack)
-			continue;
-		if (card.attack < smallestAttack && card.defense < smallestHealth) {
-			res = &card;
-			smallestAttack = card.attack;
-			smallestHealth = card.defense;
-		}
-	}
-	return res;
-}
-
-int State::BreakEnemyBuble(Card& targetCard)
-{
-	Card* wekestCard = FindCardWithSmallestAttack();
-	if (wekestCard->attack > 2)
-		return 0;
-	if (wekestCard && CanAttackCard(targetCard)) {
-		Action a;
-		a.Attack(wekestCard->instanceId, targetCard.instanceId);
-		wekestCard->canAttack = false;
-		if (wekestCard->defense <= targetCard.attack)
-			RemoveMyCard(*wekestCard);
-		return 1;
-	}
-	return 0;
-}
-
-bool State::CanAttackCard(Card& enemyCard)
-{
-	if (enemyCard.abilities & Card::Abilities::Guard)
-		return true;
-
-	return EnemyHasTaunts();
-}
-
-bool State::EnemyHasTaunts() const
-{
-	for (const auto& card : enemyBoard)
-		if (card.abilities & Card::Abilities::Guard)
-			return true;
-
-	return false;
-}
-
-int State::AttackFace(Card& myCard)
-{
-	Action a;
-	if (myCard.canAttack)
-		a.Attack(myCard.instanceId);
-	myCard.canAttack = false;
-	return !myCard.canAttack;
-}
-
-void Drafter::MakeChoice()
-{
-	int cartToPlayIndex = 0;
-
-	float bigger = 0.0;
-
-	for (int j = 0; j < hand.size(); ++j) {
-		float currValue = calcCardValue(hand[j]);
-		cerr << "Card id " << hand[j].cardId << " value " << currValue << '\n';
-		if (currValue > bigger) {
-			bigger = currValue;
-			cartToPlayIndex = j;
-		}
-	}
-	Action a;
-	a.Pick(cartToPlayIndex);
-
-}
-
-float calcCardValue(Card& c)
-{
-	//TODO MAKE IN CLASS; AND MAP WITH ABILITIES SCALE
-	const static std::set<Card::Abilities> allAbilities = {
-		Card::Abilities::Breakthrough,
-		Card::Abilities::Charge,
-		Card::Abilities::Drain,
-		Card::Abilities::Guard,
-		Card::Abilities::Lethal,
-		Card::Abilities::Ward };
-
-	float value = 0.f;
-	if (c.cost == 0 || c.attack == 0)
-		return value;
-	float attackCoff = c.attack / c.cost;
-	float defenseCoff = c.defense / c.cost;
-
-	value += attackCoff;
-	value += defenseCoff;
-	float statsDiff = abs(c.attack - c.defense);
-	if (statsDiff > 5 && c.cost < 8) {
-		value -= 4.f;
-	}
-	if (statsDiff) {
-		value += 1.5f / statsDiff;
-	}
-	else {
-		value += 1.f;
-	}
-	for (const auto& ability : allAbilities) {
-		if (c.abilities & ability)
-			value += (0.2 * c.cost);
-	}
-	int curve = abs(GameConstants::GoodCurve - c.cost);
-	if (curve) {
-		value += 7.f / curve;
-	}
-	else {
-		value += 6.5f;
-	}
-	if (c.cost < 3) {
-		value -= 4.f;
-	}
-	value += c.cost * 0.2;
-	return value;
-}
-
-State::State(istream& i) :  m_Drafter(myHand)
+State::State(istream& i) 
 {
 	players[Me] = Player(i);
 	players[Opponent] = Player(i);
@@ -505,49 +406,301 @@ State::State(istream& i) :  m_Drafter(myHand)
 	state = players[Me].GetMana() ? GameState::BATTLE : GameState::DRAFT;
 }
 
-void State::Think()
+float Calculator::CalcCardPower(const Card& card) const
 {
-	if (state == GameState::DRAFT)
-		m_Drafter.MakeChoice();
-	else {
-		vector<Card> playableCards;
+	return powerCalcFunctions.find(card.type)->second(card);
+}
 
-		copy_if(myHand.begin(), myHand.end(), back_inserter(playableCards), [&](Card card) {
-			assert(card.location == Card::Location::InHand);
-			auto& me = players[Me];
-			if (card.cost <= me.GetMana()) {
-				if (card.type == Card::Type::GreenItem) {
-					if (!myBoard.empty()) {
-						me.SpendMana(card.cost);
-						card.location = Card::Location::OnBoard;
-						return true;
-					}
-				}
-				else if (card.type == Card::Type::Creature) {
-					me.SpendMana(card.cost);
-					card.location = Card::Location::OnBoard;
-					return true;
-				}
+float Calculator::CalcCardValue(const Card& c) const
+{
+
+	auto it = valueCalcFunctions.find(c.type);
+	if (it != valueCalcFunctions.end())
+		return it->second(c);
+
+	return 0.0f;
+}
+
+
+
+Calculator::Calculator()
+{
+	valueCalcFunctions.insert(make_pair(Card::Type::Creature, [&](const Card & c) {
+		float value = 0.f;
+		for (const auto& it : allAbilities)
+			if (c.abilities & it.first)
+				value += it.second;
+		value += c.attack / c.cost;
+		value += c.defense / c.cost;
+		value += c.cardDraw;
+		value += c.myHealthChange / 4;
+		value += c.opponentHealthChange / 4;
+		if (c.cost < 3)
+			value -= 1.f;
+		if (c.defense / c.attack >= 3 || c.attack / c.defense >= 3)
+			value -= 1.5;
+		if (c.cost >= 8)
+				value -= 0.7f;
+		return value;
+		}));
+
+
+	valueCalcFunctions.insert(make_pair(Card::Type::BlueItem, [&](const Card& c) {
+		float value = 0.f;
+
+
+		value += abs(c.defense) * 0.75;
+		value += c.cardDraw * 1.5;
+		value += c.myHealthChange / 2;
+		value += c.opponentHealthChange / 2;
+		value += 1 / c.cost;
+		return value;
+		}));
+
+
+
+	valueCalcFunctions.insert(make_pair(Card::Type::GreenItem, [&](const Card& c) {
+		float value = 0.f;
+		for (const auto& it : allAbilities)
+			if (c.abilities & it.first)
+				value += it.second;
+		value += c.attack / c.cost;
+		value += c.defense / c.cost;
+		value += c.cardDraw;
+		value += c.myHealthChange / 4;
+		value += c.opponentHealthChange / 4;
+		if (c.cost < 3)
+			value -= 1.f;
+		value += 0.75;
+		return value;
+		}));
+
+
+	valueCalcFunctions.insert(make_pair(Card::Type::RedItem, [&](const Card& c) {
+		float value = 0.f;
+		for (const auto& it : allAbilities)
+			if (c.abilities & it.first) {
+				value += 2;
+				break;
 			}
-			return false;
-			});
+				
+		value += (c.attack * 2) / c.cost;
+		value += abs(c.defense * 2) / c.cost;
+		value += c.cardDraw * 1.5f;
+		value += c.myHealthChange / 4;
+		value += c.opponentHealthChange / 4;
+		if (c.cost < 3)
+			value -= 1.f;
+		return value;
+		}));
 
 
-		Action a;
-		for (Card& card : playableCards) {
-			if (card.type == Card::Type::Creature) {
-				a.Summon(card.instanceId);
+	powerCalcFunctions.insert(make_pair(Card::Type::Creature, [&](const Card& c) {
+		float value = 0.f;
+		for (const auto& it : allAbilities)
+			if (c.abilities & it.first)
+				value += it.second * c.cost;
+		value += c.attack;
+		value += c.defense;
+
+		return value;
+		}));
+
+	powerCalcFunctions.insert(make_pair(Card::Type::BlueItem, [&](const Card& c) {
+		float value = 0.f;
 
 
+		value += abs(c.defense) * 0.75;
+		value += c.cardDraw * 1.5;
+		value += c.myHealthChange / 2;
+		value += c.opponentHealthChange / 2;
+		value += 1 / c.cost;
+		return value *=2;
+		}));
+
+	powerCalcFunctions.insert(make_pair(Card::Type::GreenItem, [&](const Card& c) {
+		float value = 0.f;
+		for (const auto& it : allAbilities)
+			if (c.abilities & it.first)
+				value += it.second;
+		value += c.attack / c.cost;
+		value += c.defense / c.cost;
+		value += c.cardDraw;
+		value += c.myHealthChange / 4;
+		value += c.opponentHealthChange / 4;
+		if (c.cost < 3)
+			value -= 1.f;
+		value += 0.75;
+		return value*2;
+		}));
+
+	powerCalcFunctions.insert(make_pair(Card::Type::RedItem, [&](const Card& c) {
+		float value = 0.f;
+		for (const auto& it : allAbilities)
+			if (c.abilities & it.first) {
+				value += 2;
+				break;
 			}
-			else if (card.type == Card::Type::GreenItem) {
-				a.Use(card.instanceId, myBoard.front().instanceId);
-				myBoard.front().attack += card.attack;
-				myBoard.front().defense += card.defense;
-			}
+
+		value += (c.attack * 2) / c.cost;
+		value += abs(c.defense * 2) / c.cost;
+		value += c.cardDraw * 1.5f;
+		value += c.myHealthChange / 4;
+		value += c.opponentHealthChange / 4;
+		if (c.cost < 3)
+			value -= 1.f;
+		return value;
+		}));
+
+
+}
+
+float Agent::Fitness(const Action* action)
+{
+	return action->GetValue();
+}
+
+void Agent::Draft()
+{
+	float biggestVal = -1.f;
+	int cardToPlay = 0;
+	Calculator calc;
+	for (int i = 0; i < m_State.GetMyHand().size();++i) {
+
+		float val = calc.CalcCardValue(m_State.GetMyHand()[i]);
+		if (val >= biggestVal) {
+			cardToPlay = i;
+			biggestVal = val;
 		}
-		Battle();
 	}
 
-	cout << "\n";
+	PickAction p(cardToPlay);
+	p.Perform(cout);
+}
+
+Agent::Agent(istream& a) : m_State(a)
+{
+	m_GameState = m_State.GetState();
+}
+
+void Agent::Think()
+{
+	if (m_GameState == GameState::DRAFT) {
+		Draft();
+		return;
+	}
+	auto population = m_State.GetAllPosibleActions();
+	population.reserve(population.size() * 4);
+	/*int generationCout = 0;
+	while (generationCout < 14) {
+
+	}
+*/
+	
+
+}
+
+AttackAction::AttackAction(const Card* pMyCard, const Card* pEnemyCard) : Action(0), myCard(pMyCard), enemyCard(pEnemyCard) {
+	
+	Calculator calc;
+	value = 0.f;
+	if (!enemyCard)
+	{
+		value = GameConstants::FaceAttackVal;
+		return;
+	}
+	
+	if (enemyCard->abilities & Card::Abilities::Ward) {
+		if (myCard->attack != 0) {
+			value += pEnemyCard->defense / myCard->attack;
+		}
+	}
+	else {
+		if (myCard->attack >= enemyCard->defense || myCard->abilities & Card::Abilities::Lethal) {
+			value += calc.CalcCardPower(*enemyCard);
+		}
+	}
+
+
+	if (enemyCard->abilities & Card::Abilities::Lethal || 
+		(!(myCard->abilities & Card::Abilities::Ward) && enemyCard->attack >= myCard->defense)) {
+		value -= calc.CalcCardPower(*myCard);
+	}
+
+	if (myCard->abilities & Card::Abilities::Ward) {
+		value += myCard->defense / 2.f + enemyCard->attack / 2.f;
+	}
+
+
+
+}
+
+void AttackAction::Perform(ostream& s) const
+{
+	s << "ATTACK " << myCard->instanceId << " " << (enemyCard ? enemyCard->instanceId : -1) << ";";
+}
+
+SummonAction::SummonAction(const Card* card) : Action(card->cost), summonCard(card) {
+	value += Calculator().CalcCardPower(*card);
+}
+
+void SummonAction::Perform(ostream& s) const
+{
+	s << "SUMMON " << summonCard->instanceId << ";";
+}
+
+UseAction::UseAction(const Card* myCard, const Card* pTarget) : Action(myCard->cost), myCard(myCard), target(pTarget) {
+
+	if (!target)
+		value = 0.f;
+	if (myCard->type == Card::Type::RedItem || myCard->type == Card::Type::BlueItem) {
+		if (target->abilities & Card::Abilities::Ward) {
+			value += target->defense / abs(myCard->defense);
+		}
+		else {
+			float diff = myCard->defense + target->defense;
+			if (diff < 0) {
+
+			}
+			else if (!diff) {
+
+			}
+			else {
+				value -= myCard->defense;
+			}
+		}
+	}
+	else {
+		value = 3.f;
+	}
+	
+}
+
+void UseAction::Perform(ostream& s) const
+{
+
+	s << "USE " << myCard->instanceId << " " << (target ? target->instanceId : -1) << ";";
+}
+
+ComplicatedAction::ComplicatedAction(Action* first, Action* second) : Action(first->GetCost() + second->GetCost())
+{
+
+	value = first->GetValue() + second->GetValue();
+}
+
+void ComplicatedAction::Perform(ostream& s) const
+{
+	for (const auto& action : subActions)
+		action->Perform(s);
+}
+
+void PassAction::Perform(ostream& s) const
+{
+	s << "PASS";
+
+}
+
+void PickAction::Perform(ostream& s) const
+{
+	s << "PICK " << cardNum;
 }

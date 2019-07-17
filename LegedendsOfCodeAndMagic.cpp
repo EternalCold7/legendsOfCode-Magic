@@ -26,11 +26,12 @@ class NoImplementedError {};
 static const char * g_encodingTable = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
 static char g_decodingTable[256] = {0};
 static bool g_decodingInit = false; 
+high_resolution_clock::time_point turnStartPoint;
 void trap() {
 	*(int*)0 = 0;
 }
 struct BitStream {
-	static const int MAX_SIZE = 512;
+	static const int MAX_SIZE = 1024;
 	void initRead(const char* str);
 	bool readBit();
 	void writeBit(bool value);
@@ -130,9 +131,9 @@ bool BitStream::readBit() {
 }
 struct Card {
 	enum class Location {
-		OpponentsBoard = 0,
-		InHand = 1,
-		OnBoard = 2
+		OpponentsBoard = -1,
+		InHand = 0,
+		OnBoard = 1
 	};
 	enum class Type {
 		Creature = 0,
@@ -149,6 +150,7 @@ struct Card {
 		Ward = 0b00100000
 	};
 	Card(istream& i);
+	Card() = default;
 	int cardId;
 	int instanceId;
 	Location location;
@@ -171,11 +173,55 @@ void Card::read(BitStream& bs) {
 	instanceId = bs.readInt(6);
 	location = (Location)bs.readInt(2);
 	type = (Type)bs.readInt(2);
+	cost = bs.readInt(4);
+	attack = bs.readInt(4);
+	defense = bs.readInt(4);
+	myHealthChange = bs.readInt(4);
+	opponentHealthChange = bs.readInt(4);
+	cardDraw = bs.readInt(3);
+
+	if (bs.readBit()) {
+		abilities |= Card::Abilities::Breakthrough;
+	}
+	if (bs.readBit()) {
+		abilities |= Card::Abilities::Charge;
+	}
+	if (bs.readBit()) {
+		abilities |= Card::Abilities::Drain;
+	}
+	if (bs.readBit()) {
+		abilities |= Card::Abilities::Guard;
+	}
+	if (bs.readBit()) {
+		abilities |= Card::Abilities::Lethal;
+	}
+	if (bs.readBit()) {
+		abilities |= Card::Abilities::Ward;
+	}
+	canAttack = bs.readBit();
 
 }
 void Card::write(BitStream& bs) {
 
+	bs.writeInt(cardId, 6);
+	bs.writeInt(instanceId,6);
+	bs.writeInt((int)location,2);
+	bs.writeInt((int)type ,2);
+	bs.writeInt(cost ,4);
+	bs.writeInt(attack,4);
+	bs.writeInt(defense ,4);
+	bs.writeInt(myHealthChange,4);
+	bs.writeInt(opponentHealthChange,4);
+	bs.writeInt(cardDraw ,3);
+
+	bs.writeBit(abilities & Card::Abilities::Breakthrough);
+	bs.writeBit(abilities & Card::Abilities::Charge);
+	bs.writeBit(abilities & Card::Abilities::Drain);
+	bs.writeBit(abilities & Card::Abilities::Guard);
+	bs.writeBit(abilities & Card::Abilities::Lethal);
+	bs.writeBit(abilities & Card::Abilities::Ward);
 	
+	bs.writeBit(canAttack);
 }
 enum {
 	Me = 0,
@@ -188,21 +234,31 @@ namespace GameConstants {
 	const float FaceAttackVal = 2.f;
 }
 
-
+class ComplicatedAction;
 class Action {
 
 protected:
-	Action(int Cost) : Cost(Cost) {};
+	static uint32_t s_ActionsCount;
+	
+	Action(int Cost) : Cost(Cost) {
+		id = s_ActionsCount++;
+	};
 	float value = 0;
 	int Cost = 0;
+	int id;
 public:
-	
+	Action(const Action&) = delete;
+	inline int GetId() const { return id; }
+	static void ResetCount() { s_ActionsCount = 0; }
 	int GetCost() const { return Cost; }
 	int GetValue() const { return value; }
 	virtual void Perform(ostream& s) const = 0;
-
+	virtual bool IsEquals(const Action& another)const { return another.id == id; }
+	virtual bool IsEquals(const ComplicatedAction& another) const;
 };
 
+
+uint32_t Action::s_ActionsCount = 0;
 class SummonAction : public Action {
 private:
 	const Card* summonCard;
@@ -239,16 +295,32 @@ public:
 
 class PassAction : public Action {
 public:
-	PassAction() = default;
+	PassAction() :Action(0){};
 	virtual void Perform(ostream& s)const override;
 };
 class ComplicatedAction :public Action {
 	vector<Action* > subActions;
 public:
 	ComplicatedAction(Action* first, Action* second);
-	virtual void Perform(ostream& s)const override;
+	virtual void Perform(ostream& s) const override;
+	bool IsEquals(const Action & another) const override {
+		for (const auto& action : subActions)
+			if (another.IsEquals(*action))
+				return true;
+		return false;
+	}
+	const vector<Action*>& GetSubs() const { return subActions; }
+
  };
 
+bool Action::IsEquals(const ComplicatedAction& another) const{
+	for (const auto& action : another.GetSubs()) {
+		if (IsEquals(*action))
+			return true;
+
+		return false;
+	}
+}
 
 
 
@@ -327,7 +399,7 @@ void Player::write(BitStream& bs) {
 class State {
 	
 
-	GameState state;
+	
 	Player players[2];
 	vector<Card> myHand;
 	vector<Card> myBoard;
@@ -335,7 +407,7 @@ class State {
 
 	vector<const Card*> GetEnemyTaunts() const;
 	vector<const Card*> GetSpells() const;
-	
+	int CardsCount;
 public:
 	inline GameState GetState() const { return state; }
 	vector<Action*> GetAllPosibleActions() const;
@@ -345,21 +417,12 @@ public:
 	inline const vector<Card>& GetMyHand() const { return myHand; }
 	void read(BitStream& s);
 	void write(BitStream& s);
-
+	vector<Action*> CheckLetal();
+	GameState state;
 	State(istream& i);
 	State() = default;
 };
-void State::read(BitStream& s)	{
-	for(int i = 0;i<2;++i)
-		players[i].read(s);
 
-	state = players[Me].GetMana() ? GameState::BATTLE : GameState::DRAFT;
-
-
-}
-void State::write(BitStream& s) {
-	players[Me].write(s);
-}
 
 class Agent {
 
@@ -368,34 +431,19 @@ class Agent {
 		Action* action;
 	};
 	State m_State;
-	GameState m_GameState;
+	
 	float Fitness(const Action * action);
 	void Draft();
 public:
+	void ChangeState(const State& state) {
+		m_State = state;
+	}
 	State& GetState() { return m_State; }
 	Agent(istream& a);
+	Agent() = default;
 	void Think();
 };
 
-int main()
-{
-
-	int kek = 0;
-
-	while (1) {
-		high_resolution_clock::time_point p1 = high_resolution_clock::now();
-		Agent s(cin);
-		if (kek < 30) {
-			cout << "PICK 0";
-		}
-		else {
-			s.Think();
-		}
-		kek++;
-		high_resolution_clock::time_point p2 = high_resolution_clock::now();
-		cerr << "Turn time " << duration_cast<milliseconds>(p2 - p1).count() << '\n';
-	}
-}
 
 Card::Card(istream& i)
 {
@@ -498,6 +546,8 @@ vector<Action*> State::GetAllPosibleActions() const
 	}
 
 	for (const auto& spell : GetSpells()) {
+		if (spell->cost > players[Me].GetMana())
+			continue;
 		if (spell->type == Card::Type::GreenItem) {
 			for (const auto& myCard : myBoard) {
 				outActions.push_back(new UseAction(spell,&myCard));
@@ -520,7 +570,38 @@ vector<Action*> State::GetAllPosibleActions() const
 
 	return outActions;
 }
+///////////////////////////STATE IMPLEMENTATION///////////////////////
+vector<Action*> State::CheckLetal() {
+	if (!GetEnemyTaunts().empty())
+		return {};
+	int enemyHealth = players[Opponent].GetHealth();
+	vector<Action*> actions;
+	int damage = 0;
+	for (const auto card : myBoard) {
+		damage += card.attack;
+		actions.push_back(new AttackAction(&card));
+	}
 
+	for (const auto& spell : myHand) {
+		if (spell.cost > players[Me].GetMana()) continue;
+		if (spell.type == Card::Type::BlueItem) {
+			
+			damage += spell.opponentHealthChange;
+			damage -= spell.defense;
+			actions.push_back(new UseAction(&spell));
+		}
+		else if (spell.type == Card::Type::RedItem) {
+			if(!enemyBoard.empty())
+			damage += spell.opponentHealthChange;
+			actions.push_back(new UseAction(&spell,&enemyBoard.back()));
+		}
+	}
+
+	if (damage < enemyHealth) {
+		actions.clear();
+	}
+	return actions;
+}
 int State::RemoveEnemyCard(Card& enemyCard)
 {
 	enemyBoard.erase(remove(enemyBoard.begin(), enemyBoard.end(), enemyCard));
@@ -532,7 +613,46 @@ int State::RemoveMyCard(Card& myCard)
 	myBoard.erase(remove(myBoard.begin(), myBoard.end(), myCard));
 	return 1;
 }
+void State::read(BitStream& s) {
+	for (int i = 0; i < 2; ++i)
+		players[i].read(s);
 
+	state = players[Me].GetMana()?	  GameState::BATTLE : GameState::DRAFT;
+
+	CardsCount = s.readInt(8);
+	for (int i = 0; i < CardsCount; ++i) {
+		Card c;
+		c.read(s);
+		if (c.location == Card::Location::InHand)
+			myHand.push_back(c);
+		else if (c.location == Card::Location::OnBoard) {
+			myBoard.push_back(c);
+		}
+		else if (c.location == Card::Location::OpponentsBoard) {
+			enemyBoard.push_back(c);
+		}
+		else {
+			cerr << "NO CARD TYPE WTF\N";
+		}
+
+	}
+
+
+}
+void State::write(BitStream& s) {
+	for(int i = 0;i <2;++i)
+		players[i].write(s);
+	s.writeInt(CardsCount, 8);
+	for (auto& card : myHand)
+		card.write(s);
+	for (auto& card : myBoard)
+		card.write(s);
+	for (auto& card : enemyBoard)
+		card.write(s);
+
+	
+
+}
 State::State(istream& i) 
 {
 	players[Me] = Player(i);
@@ -547,10 +667,10 @@ State::State(istream& i)
 		getline(cin, cardNumberAndAction);
 		actions.push_back(cardNumberAndAction);
 	}
-	int cardsAmount;
-	cin >> cardsAmount; cin.ignore();
+	
+	cin >> CardsCount; cin.ignore();
 
-	for (int j = 0; j < cardsAmount; j++) {
+	for (int j = 0; j < CardsCount; j++) {
 		Card card{ i };
 
 		if (card.location == Card::Location::InHand)
@@ -567,6 +687,7 @@ State::State(istream& i)
 	}
 
 	state = players[Me].GetMana() ? GameState::BATTLE : GameState::DRAFT;
+	
 }
 
 float Calculator::CalcCardPower(const Card& card) const
@@ -585,11 +706,13 @@ float Calculator::CalcCardValue(const Card& c) const
 }
 
 
-
+////////////////////////////////CALCULATOR IMPLEMENTATION/////////////////////////////
 Calculator::Calculator()
 {
 	valueCalcFunctions.insert(make_pair(Card::Type::Creature, [&](const Card & c) {
 		float value = 0.f;
+		if (c.attack == 0)
+			return value;
 		for (const auto& it : allAbilities)
 			if (c.abilities & it.first)
 				value += it.second;
@@ -643,10 +766,11 @@ Calculator::Calculator()
 		float value = 0.f;
 		for (const auto& it : allAbilities)
 			if (c.abilities & it.first) {
-				value += 2;
+				value += 0.5;
 				break;
 			}
-				
+		if (c.cost == 0)
+			return value;
 		value += (c.attack * 2) / c.cost;
 		value += abs(c.defense * 2) / c.cost;
 		value += c.cardDraw * 1.5f;
@@ -717,7 +841,7 @@ Calculator::Calculator()
 
 
 }
-
+/////////////////////////////AGENT IMPLEMENTATION/////////////////////////////
 float Agent::Fitness(const Action* action)
 {
 	return action->GetValue();
@@ -744,21 +868,36 @@ void Agent::Draft()
 
 Agent::Agent(istream& a) : m_State(a)
 {
-	m_GameState = m_State.GetState();
 
 }
 
 void Agent::Think()
 {
-	if (m_GameState == GameState::DRAFT) {
+	if (m_State.state == GameState::DRAFT) {
 		cerr << "In Draft\n";
 		Draft();
+		cout << '\n';
 		return;
 	}
+	/*auto kek = m_State.CheckLetal();
+	if (!kek.empty()) {
+		for (auto& lol : kek)
+			lol->Perform(cout);
+		return;
+	}*/
+
 	auto population = m_State.GetAllPosibleActions();
+	if (population.empty()) {
+		PassAction().Perform(cout);
+		cout << '\n';
+		return;
+	}
+		
 	population.reserve(population.size() * 4);
 	int generationCout = 0;
-	while (generationCout < 14) {
+	high_resolution_clock::time_point currTime = high_resolution_clock::now();
+	//while (duration_cast<milliseconds>(currTime - turnStartPoint).count() < 0) {
+	while (generationCout < 100) {
 
 
 		sort(population.begin(), population.end(), [](const Action * const left, const Action* const right) {
@@ -777,16 +916,22 @@ void Agent::Think()
 			
 			tempSel = rand() % (popIsBig ? bestActions.size() :population.size());
 		
-			Action* addAct = popIsBig ? bestActions[tempSel] : population[tempSel];
-			if (m_State.GetCurrMana() >= addAct->GetCost() + population[i]->GetCost()) {
-				population.push_back(new ComplicatedAction(addAct, population[i]));
-			}
+			Action* addAct = popIsBig ? bestActions[tempSel] : population[tempSel];//Action operator ==
+			if (addAct->IsEquals(*population[i])) continue;
+			if (m_State.GetCurrMana() < addAct->GetCost() + population[i]->GetCost()) continue;
+			population.push_back(new ComplicatedAction(addAct, population[i]));
 		}
+		generationCout++;
 	}
-
+	cerr << "gen: " << generationCout << '\n';
+	population.front()->Perform(cout);
+	
+	cout << '\n';
 	
 
 }
+
+////////////////////////////////////////ACTIONS IMPLEMENTATION//////////////////////////////
 
 AttackAction::AttackAction(const Card* pMyCard, const Card* pEnemyCard) : Action(0), myCard(pMyCard), enemyCard(pEnemyCard) {
 	
@@ -874,6 +1019,10 @@ ComplicatedAction::ComplicatedAction(Action* first, Action* second) : Action(fir
 {
 
 	value = first->GetValue() + second->GetValue();
+	subActions.push_back(first);
+	subActions.push_back(second);
+
+
 }
 
 void ComplicatedAction::Perform(ostream& s) const
@@ -890,6 +1039,30 @@ void PassAction::Perform(ostream& s) const
 
 void PickAction::Perform(ostream& s) const
 {
-	s << "PICK " << cardNum;
+	s << "PICK " << cardNum ;
 }
 
+
+
+int main()
+{
+
+	/*BitStream bs;
+	bs.initRead("Apa1C9CJKGMz7WZ2G0001IO9I0000JCg0GPG008oBW7ES0045p8HGJ00Fo0s08OW00Gd3a164008eGP123000A4AGGWm042p9K4640025Wr1Zb0000");
+	State s;
+	s.read(bs);
+	Agent a;
+	a.ChangeState(s);
+	a.Think();*/
+	while (1) {
+		turnStartPoint = high_resolution_clock::now();
+		Agent s(cin);
+		BitStream bs;
+		s.GetState().write(bs);
+		bs.encode();
+		cerr << "BitStream ";
+		bs.print(cerr);
+		cerr << '\n';
+		s.Think();
+	}
+}

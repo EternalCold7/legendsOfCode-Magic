@@ -13,6 +13,7 @@
 #include<functional>
 #include<ctime>
 #include<cstring>
+#include<list>
 using namespace std;
 using namespace std::chrono;
 namespace GameConstants {
@@ -32,9 +33,9 @@ class NoImplementedError {};
  //bool operator == (const pair<int ,int > & firstPair, const pair<int, int > & secondPair) {
  //	return firstPair.first == secondPair.first && firstPair.second == secondPair.second;
  //}
-static const char * g_encodingTable = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
-static char g_decodingTable[256] = {0};
-static bool g_decodingInit = false; 
+static const char* g_encodingTable = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_";
+static char g_decodingTable[256] = { 0 };
+static bool g_decodingInit = false;
 high_resolution_clock::time_point turnStartPoint;
 void trap() {
 	*(int*)0 = 0;
@@ -44,7 +45,7 @@ struct BitStream {
 	void initRead(const char* str);
 	bool readBit();
 	void writeBit(bool value);
-	char buffer[MAX_SIZE] = {0};
+	char buffer[MAX_SIZE] = { 0 };
 	int iter = 0;
 	int bitCount = 0;
 	void incBitCount();
@@ -53,7 +54,7 @@ struct BitStream {
 	BitStream();
 	void print(ostream& o);
 	int readInt(int bits);
-	void writeInt(int value,int bits);
+	void writeInt(int value, int bits);
 
 
 };
@@ -82,11 +83,11 @@ void BitStream::writeInt(int value, int bits) {
 void BitStream::initRead(const char* str) {
 	int count = strlen(str);
 	strcpy(buffer, str);
-	decode(count);	
+	decode(count);
 	iter = bitCount = 0;
 }
 
-void BitStream::print(ostream & o) {
+void BitStream::print(ostream& o) {
 	o << buffer;
 }
 BitStream::BitStream() {
@@ -103,7 +104,7 @@ void BitStream::decode(int count) {
 		buffer[i] = g_decodingTable[c];
 	}
 }
-void BitStream::encode(){
+void BitStream::encode() {
 	while (bitCount != 0)writeBit(false);
 	for (int i = 0; i < iter; ++i) {
 
@@ -119,7 +120,7 @@ void BitStream::incBitCount() {
 		iter++;
 		if (iter >= MAX_SIZE) {
 			cerr << "bitstream buffer full;";
-			trap(); 
+			trap();
 		}
 		bitCount = 0;
 	}
@@ -133,7 +134,7 @@ void BitStream::writeBit(bool value)
 }
 bool BitStream::readBit() {
 	auto& c = buffer[iter];
-	bool value = c& (1 << (5 - bitCount));
+	bool value = c & (1 << (5 - bitCount));
 	incBitCount();
 	return value;
 
@@ -213,15 +214,15 @@ void Card::read(BitStream& bs) {
 void Card::write(BitStream& bs) {
 
 	bs.writeInt(cardId, 6);
-	bs.writeInt(instanceId,6);
-	bs.writeInt((int)location,2);
-	bs.writeInt((int)type ,2);
-	bs.writeInt(cost ,4);
-	bs.writeInt(attack,4);
-	bs.writeInt(defense ,4);
-	bs.writeInt(myHealthChange,4);
-	bs.writeInt(opponentHealthChange,4);
-	bs.writeInt(cardDraw ,3);
+	bs.writeInt(instanceId, 6);
+	bs.writeInt((int)location, 2);
+	bs.writeInt((int)type, 2);
+	bs.writeInt(cost, 4);
+	bs.writeInt(attack, 4);
+	bs.writeInt(defense, 4);
+	bs.writeInt(myHealthChange, 4);
+	bs.writeInt(opponentHealthChange, 4);
+	bs.writeInt(cardDraw, 3);
 
 	bs.writeBit(abilities & Card::Abilities::Breakthrough);
 	bs.writeBit(abilities & Card::Abilities::Charge);
@@ -229,7 +230,7 @@ void Card::write(BitStream& bs) {
 	bs.writeBit(abilities & Card::Abilities::Guard);
 	bs.writeBit(abilities & Card::Abilities::Lethal);
 	bs.writeBit(abilities & Card::Abilities::Ward);
-	
+
 	bs.writeBit(canAttack);
 }
 enum {
@@ -242,7 +243,7 @@ class Action {
 protected:
 	static uint32_t s_ActionsCount;
 	State* m_State;
-	Action(int Cost,State*state) : Cost(Cost),m_State(state) {
+	Action(int Cost, State* state) : Cost(Cost), m_State(state) {
 		id = s_ActionsCount++;
 	};
 	float value = 0;
@@ -255,9 +256,9 @@ public:
 	static void ResetCount() { s_ActionsCount = 0; }
 	int GetCost() const { return Cost; }
 	int GetValue() const { return value; }
-	virtual void Perform(ostream& s)  = 0;
+	virtual void Perform(ostream& s) = 0;
 	friend class State;
-	virtual bool IsEqual(Action & another) = 0;
+	virtual bool IsEqual(Action& another) = 0;
 	//virtual ~Action() {};
 };
 
@@ -280,8 +281,8 @@ public:
 uint32_t Action::s_ActionsCount = 0;
 class SummonAction : public Action {
 private:
-	 Card* summonCard = nullptr;
-	 int summonCardId = -1;
+	Card* summonCard = nullptr;
+	int summonCardId = -1;
 public:
 	friend class State;
 	SummonAction(State* state, Card* card);
@@ -302,20 +303,25 @@ public:
 
 class AttackAction final : public Action {
 private:
-	 Card* myCard = nullptr;
-	 Card* enemyCard = nullptr;
+	Card* myCard = nullptr;
+	Card* enemyCard = nullptr;
 
-	 bool needToErase = false;
-	 bool needToEraseEnemy = false;
-	 int cardInstanceID = -1;
-	 int enemyInstanceID = -1;
+	bool needToErase = false;
+	bool needToEraseEnemy = false;
+	int cardInstanceID = -1;
+	int enemyInstanceID = -1;
 public:
-	AttackAction(State * state, Card* myCard,  Card* enemyCard = nullptr);
+	AttackAction(State* state, Card* myCard, Card* enemyCard = nullptr);
 	virtual void Perform(ostream& s) override;
 	int GetCardInstanceID() const { return cardInstanceID; }
 	virtual bool IsEqual(Action& another) override {
 		if (AttackAction * ac = dynamic_cast<AttackAction*>(&another)) {
-			return this->cardInstanceID == ac->cardInstanceID;
+			if (cardInstanceID == ac->cardInstanceID)
+				return true;
+			if (ac->enemyInstanceID == enemyInstanceID)
+				if (ac->needToEraseEnemy || needToEraseEnemy)
+					return true;
+			return false;
 		}
 		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
 			for (auto& kek : comp->GetSubs()) {
@@ -330,20 +336,20 @@ public:
 class PickAction : public Action {
 	int cardNum = -1;
 public:
-	PickAction(int cardNumber) :Action(0,nullptr), cardNum(cardNumber) {}
+	PickAction(int cardNumber) :Action(0, nullptr), cardNum(cardNumber) {}
 	virtual void Perform(ostream& s) override;
 	virtual bool IsEqual(Action& another) override { return id == another.GetId(); }
 };
 
 class UseAction : public Action {
 private:
-	 Card* myCard;
-	 Card* target;
-	 int myCardInstanceID = -1;
-	 int enemyCardInstanceID = -1;
-	 bool needToRemoveEnemy = false;
+	Card* myCard;
+	Card* target;
+	int myCardInstanceID = -1;
+	int enemyCardInstanceID = -1;
+	bool needToRemoveEnemy = false;
 public:
-	UseAction(State * state, Card* myCard,  Card* enemyCard = nullptr);
+	UseAction(State* state, Card* myCard, Card* enemyCard = nullptr);
 	virtual void Perform(ostream& s) override;
 	int GetCardInstanceID() const { return myCardInstanceID; }
 	virtual bool IsEqual(Action& another) override {
@@ -362,7 +368,7 @@ public:
 
 class PassAction : public Action {
 public:
-	PassAction() :Action(0,nullptr){};
+	PassAction() :Action(0, nullptr) {};
 	virtual void Perform(ostream& s) override;
 	virtual bool IsEqual(Action& another) override { return false; }
 };
@@ -377,24 +383,26 @@ class Calculator {
 	{Card::Abilities::Guard,1.f},
 	{Card::Abilities::Lethal,1.2f},
 	{Card::Abilities::Ward,1.5f} };
-	
+
 	map<Card::Type, function<float(const Card&)>> valueCalcFunctions;
 	map<Card::Type, function<float(const Card&)>> powerCalcFunctions;
-	
-	
+
+
 public:
 	float CalcCardValue(const Card& card) const;
 	float CalcCardPower(const Card& card) const;
-//	float CalcActionValue(const Action& action) const { return 0.f; };
+	//	float CalcActionValue(const Action& action) const { return 0.f; };
 	Calculator();
 };
-
-
 
 
 bool operator == (const Card& first, const Card& second) {
 	return first.instanceId == second.instanceId;
 }
+
+
+
+
 
 enum class GameState {
 	DRAFT,
@@ -422,7 +430,7 @@ public:
 
 };
 void Player::read(BitStream& bs) {
-	health= bs.readInt(7);
+	health = bs.readInt(7);
 	mana = bs.readInt(4);
 	deckCardsAmount = bs.readInt(6);
 	rune = bs.readInt(3);
@@ -431,36 +439,37 @@ void Player::read(BitStream& bs) {
 
 }
 void Player::write(BitStream& bs) {
-	bs.writeInt(health,7);
-	bs.writeInt(mana,4);
-	bs.writeInt(deckCardsAmount,6);
-	bs.writeInt(rune,3);
-	bs.writeInt(draw,3);
+	bs.writeInt(health, 7);
+	bs.writeInt(mana, 4);
+	bs.writeInt(deckCardsAmount, 6);
+	bs.writeInt(rune, 3);
+	bs.writeInt(draw, 3);
 
 
 }
 
 
 class State {
-	
 
-	
+
+
 	Player players[2];
-	vector<Card> myHand;
-	vector<Card> myBoard;
-	vector<Card> enemyBoard;
+	list<Card> myHand;
+	list<Card> myBoard;
+	list<Card> enemyBoard;
 
-	
+
 	int CardsCount;
 public:
 	inline GameState GetState() const { return state; }
 	vector<Action*> GetAllPosibleActions();
-	vector< Card*> GetEnemyTaunts() ;
-	vector< Card*> GetSpells() ;
-	int RemoveEnemyCard(int instanceId);
-	int RemoveMyCard(int instanceId);
+	vector< Card*> GetEnemyTaunts();
+	vector< Card*> GetSpells();
+	int RemoveEnemyCard(Card* cardToRemove);
+	int RemoveMyCardFromBoard(Card* cardToRemove);
+	int RemoveMyCardFromHand(Card* cardToRemove);
 	inline int GetCurrMana() const { return players[Me].GetMana(); }
-	inline const vector<Card>& GetMyHand() const { return myHand; }
+	inline const list<Card>& GetMyHand() const { return myHand; }
 	void read(BitStream& s);
 	void write(BitStream& s);
 	vector<Action*> CheckLetal();
@@ -480,8 +489,8 @@ class Agent {
 		Action* action;
 	};
 	State m_State;
-	
-	float Fitness(const Action * action);
+
+	float Fitness(const Action* action);
 	void Draft();
 public:
 	friend class State;
@@ -544,19 +553,19 @@ Player::Player(istream& i)
 
 
 
-vector< Card*> State::GetEnemyTaunts()  {
+vector< Card*> State::GetEnemyTaunts() {
 	vector< Card*> enemyTaunts;
-	for ( auto& card : enemyBoard)
+	for (auto& card : enemyBoard)
 		if (card.abilities & Card::Abilities::Guard)
 			enemyTaunts.push_back(&card);
 
 	return enemyTaunts;
 }
 
-vector< Card*> State::GetSpells() 
+vector< Card*> State::GetSpells()
 {
 	vector< Card*> spells;
-	for ( auto& card : myHand) {
+	for (auto& card : myHand) {
 		if (card.type == Card::Type::BlueItem ||
 			card.type == Card::Type::RedItem ||
 			card.type == Card::Type::GreenItem) {
@@ -566,52 +575,52 @@ vector< Card*> State::GetSpells()
 	return spells;
 }
 
-vector<Action*> State::GetAllPosibleActions() 
+vector<Action*> State::GetAllPosibleActions()
 {
 	vector<Action*> outActions;
 	auto taunts = GetEnemyTaunts();
 	if (!taunts.empty()) {
-		
-		for ( auto& card : myBoard) {
+
+		for (auto& card : myBoard) {
 			if (!card.canAttack)
 				continue;
-			for ( auto& enemyTaunt : taunts) {
-				outActions.push_back(new AttackAction(this,&card, enemyTaunt));
+			for (auto& enemyTaunt : taunts) {
+				outActions.push_back(new AttackAction(this, &card, enemyTaunt));
 			}
 
 		}
 	}
 
 	else {
-		for ( auto& card : myBoard) {
+		for (auto& card : myBoard) {
 			if (!card.canAttack)
 				continue;
 
-			outActions.push_back(new AttackAction(this,&card));
-			for ( auto& enemyCard : enemyBoard) {
-				outActions.push_back(new AttackAction(this,&card, &enemyCard));
+			outActions.push_back(new AttackAction(this, &card));
+			for (auto& enemyCard : enemyBoard) {
+				outActions.push_back(new AttackAction(this, &card, &enemyCard));
 			}
 
 		}
 	}
 
-	for ( auto& spell : GetSpells()) {
+	for (auto& spell : GetSpells()) {
 		if (spell->cost > players[Me].GetMana())
 			continue;
 		if (spell->type == Card::Type::GreenItem) {
-			for ( auto& myCard : myBoard) {
-				outActions.push_back(new UseAction(this,spell,&myCard));
+			for (auto& myCard : myBoard) {
+				outActions.push_back(new UseAction(this, spell, &myCard));
 			}
 		}
 		else {
-			for ( auto& enemyCard : enemyBoard) {
-				outActions.push_back(new UseAction(this,spell, &enemyCard));
+			for (auto& enemyCard : enemyBoard) {
+				outActions.push_back(new UseAction(this, spell, &enemyCard));
 			}
 		}
 	}
-	for ( auto& card : myHand) {
+	for (auto& card : myHand) {
 		if (card.type == Card::Type::Creature && card.cost <= players[Me].GetMana()) {
-			outActions.push_back(new SummonAction(this,&card));
+			outActions.push_back(new SummonAction(this, &card));
 		}
 	}
 
@@ -631,23 +640,23 @@ vector<Action*> State::CheckLetal() {
 	int enemyHealth = players[Opponent].GetHealth();
 	vector<Action*> actions;
 	int damage = 0;
-	for ( auto card : myBoard) {
+	for (auto card : myBoard) {
 		damage += card.attack;
-		actions.push_back(new AttackAction(this,&card));
+		actions.push_back(new AttackAction(this, &card));
 	}
 
-	for ( auto& spell : myHand) {
+	for (auto& spell : myHand) {
 		if (spell.cost > players[Me].GetMana()) continue;
 		if (spell.type == Card::Type::BlueItem) {
-			
+
 			damage += spell.opponentHealthChange;
 			damage -= spell.defense;
-			actions.push_back(new UseAction(this,&spell));
+			actions.push_back(new UseAction(this, &spell));
 		}
 		else if (spell.type == Card::Type::RedItem) {
-			if(!enemyBoard.empty())
-			damage += spell.opponentHealthChange;
-			actions.push_back(new UseAction(this,&spell,&enemyBoard.back()));
+			if (!enemyBoard.empty())
+				damage += spell.opponentHealthChange;
+			actions.push_back(new UseAction(this, &spell, &enemyBoard.back()));
 		}
 	}
 
@@ -656,34 +665,56 @@ vector<Action*> State::CheckLetal() {
 	}
 	return actions;
 }
-int State::RemoveEnemyCard(int instanceId)
+int State::RemoveEnemyCard(Card* cardToRemove)
 {
-	int index = -1;
-	for (uint32_t i = 0; i < enemyBoard.size(); ++i)
-		if (enemyBoard[i].instanceId == instanceId)
-			index = i;
-
-	if (index != -1)
-		enemyBoard.erase(enemyBoard.begin() + index);
+	list<Card>::iterator removeIt = enemyBoard.end();
+	for (auto it = enemyBoard.begin(); it != enemyBoard.end(); ++it) {
+		if (it->instanceId == cardToRemove->instanceId) {
+			removeIt = it;
+			break;
+		}
+	}
+	if (removeIt != enemyBoard.end()) {
+		enemyBoard.erase(removeIt);
+	}
 	return 1;
 }
 
-int State::RemoveMyCard(int instanceId)
+int State::RemoveMyCardFromBoard(Card* cardToRemove)
 {
-	int index = -1;
-	for (uint32_t i = 0; i < myBoard.size(); ++i)
-		if (myBoard[i].instanceId == instanceId)
-			index = i;
 
-	if (index != -1)
-		myBoard.erase(myBoard.begin() + index);
+	list<Card>::iterator removeIt = myBoard.end();
+	for (auto it = myBoard.begin(); it != myBoard.end(); ++it) {
+		if (it->instanceId == cardToRemove->instanceId) {
+			removeIt = it;
+			break;
+		}
+	}
+	if (removeIt != myBoard.end()) {
+		myBoard.erase(removeIt);
+	}
+
+	return 1;
+}
+int State::RemoveMyCardFromHand(Card* cardToRemove) {
+
+	list<Card>::iterator removeIt = myHand.end();
+	for (auto it = myHand.begin(); it != myHand.end(); ++it) {
+		if (it->instanceId == cardToRemove->instanceId) {
+			removeIt = it;
+		}
+	}
+	if (removeIt != myHand.end()) {
+		myHand.erase(removeIt);
+	}
+
 	return 1;
 }
 void State::read(BitStream& s) {
 	for (int i = 0; i < 2; ++i)
 		players[i].read(s);
 
-	state = players[Me].GetMana()?	  GameState::BATTLE : GameState::DRAFT;
+	state = players[Me].GetMana() ? GameState::BATTLE : GameState::DRAFT;
 
 	CardsCount = s.readInt(8);
 	for (int i = 0; i < CardsCount; ++i) {
@@ -706,7 +737,7 @@ void State::read(BitStream& s) {
 
 }
 void State::write(BitStream& s) {
-	for(int i = 0;i <2;++i)
+	for (int i = 0; i < 2; ++i)
 		players[i].write(s);
 	s.writeInt(CardsCount, 8);
 	for (auto& card : myHand)
@@ -716,10 +747,10 @@ void State::write(BitStream& s) {
 	for (auto& card : enemyBoard)
 		card.write(s);
 
-	
+
 
 }
-State::State(istream& i) 
+State::State(istream& i)
 {
 	players[Me] = Player(i);
 	players[Opponent] = Player(i);
@@ -733,7 +764,7 @@ State::State(istream& i)
 		getline(cin, cardNumberAndAction);
 		actions.push_back(cardNumberAndAction);
 	}
-	
+
 	cin >> CardsCount; cin.ignore();
 
 	for (int j = 0; j < CardsCount; j++) {
@@ -753,7 +784,7 @@ State::State(istream& i)
 	}
 
 	state = players[Me].GetMana() ? GameState::BATTLE : GameState::DRAFT;
-	
+
 }
 
 float Calculator::CalcCardPower(const Card& card) const
@@ -775,7 +806,7 @@ float Calculator::CalcCardValue(const Card& c) const
 ////////////////////////////////CALCULATOR IMPLEMENTATION/////////////////////////////
 Calculator::Calculator()
 {
-	valueCalcFunctions.insert(make_pair(Card::Type::Creature, [&](const Card & c) {
+	valueCalcFunctions.insert(make_pair(Card::Type::Creature, [&](const Card& c) {
 		float value = 0.f;
 		if (c.attack == 0 || c.cost == 0)
 			return value;
@@ -792,7 +823,7 @@ Calculator::Calculator()
 		if (c.defense / c.attack >= 3 || c.attack / c.defense >= 3)
 			value -= 1.5;
 		if (c.cost >= 8)
-				value -= 0.7f;
+			value -= 0.7f;
 		return value;
 		}));
 
@@ -832,13 +863,14 @@ Calculator::Calculator()
 
 	valueCalcFunctions.insert(make_pair(Card::Type::RedItem, [&](const Card& c) {
 		float value = 0.f;
+		if (c.cost == 0 || c.defense == 0)
+			return value;
 		for (const auto& it : allAbilities)
 			if (c.abilities & it.first) {
 				value += 0.5;
 				break;
 			}
-		if (c.cost == 0)
-			return value;
+
 		value += (c.attack * 2) / c.cost;
 		value += abs(c.defense * 2) / c.cost;
 		value += c.cardDraw * 1.5f;
@@ -870,7 +902,7 @@ Calculator::Calculator()
 		value += c.myHealthChange / 2;
 		value += c.opponentHealthChange / 2;
 		value += 1 / c.cost;
-		return value *=2;
+		return value *= 2;
 		}));
 
 	powerCalcFunctions.insert(make_pair(Card::Type::GreenItem, [&](const Card& c) {
@@ -886,7 +918,7 @@ Calculator::Calculator()
 		if (c.cost < 3)
 			value -= 1.f;
 		value += 0.75;
-		return value*2;
+		return value * 2;
 		}));
 
 	powerCalcFunctions.insert(make_pair(Card::Type::RedItem, [&](const Card& c) {
@@ -920,13 +952,14 @@ void Agent::Draft()
 	float biggestVal = -1.f;
 	int cardToPlay = 0;
 	Calculator calc;
-	for (int i = 0; i < m_State.GetMyHand().size();++i) {
-
-		float val = calc.CalcCardValue(m_State.GetMyHand()[i]);
+	int i = 0;
+	for (auto& elem : m_State.GetMyHand()) {
+		float val = calc.CalcCardValue(elem);
 		if (val >= biggestVal) {
 			cardToPlay = i;
 			biggestVal = val;
 		}
+		i++;
 	}
 
 
@@ -947,12 +980,7 @@ void Agent::Think()
 		cout << '\n';
 		return;
 	}
-	//auto kek = m_State.CheckLetal();
-	//if (!kek.empty()) {
-	//	for (auto& lol : kek)
-	//		lol->Perform(cout);
-	//	return;
-	//}
+
 	bool wasTaunts = !m_State.GetEnemyTaunts().empty();
 	auto population = m_State.GetAllPosibleActions();
 	if (population.empty()) {
@@ -964,15 +992,15 @@ void Agent::Think()
 
 	if (wasTaunts) {
 		population = m_State.GetAllPosibleActions();
-		if(!population.empty()) { StartSelection(population); }
-			
+		if (!population.empty()) { StartSelection(population); }
+
 	}
-	
+
 
 
 
 	cout << '\n';
-	
+
 
 }
 void Agent::StartSelection(vector<Action*>& population) {
@@ -1007,16 +1035,16 @@ void Agent::StartSelection(vector<Action*>& population) {
 			if ((*addAct).IsEqual(*curr)) continue;
 			if (m_State.GetCurrMana() < addAct->GetCost() + curr->GetCost()) continue;
 			if (population.size() >= GameConstants::MaxPopCount) break;
-			population.push_back(new ComplicatedAction(&m_State,addAct, curr));
+			population.push_back(new ComplicatedAction(&m_State, addAct, curr));
 		}
 		generationCout++;
 
 		sort(population.begin(), population.end(), [](const Action* const left, const Action* const right) {
 			return left->GetValue() > right->GetValue();
 			});
-			/*if (lastIterationMaxFitness == population.front()->GetValue())
-				break;*/
-			lastIterationMaxFitness = population.front()->GetValue();
+		/*if (lastIterationMaxFitness == population.front()->GetValue())
+			break;*/
+		lastIterationMaxFitness = population.front()->GetValue();
 		currTime = high_resolution_clock::now();
 	}
 
@@ -1029,8 +1057,8 @@ void Agent::StartSelection(vector<Action*>& population) {
 
 ////////////////////////////////////////ACTIONS IMPLEMENTATION//////////////////////////////
 
-AttackAction::AttackAction(State* state, Card* pMyCard,  Card* pEnemyCard) : Action(0,state), myCard(pMyCard), enemyCard(pEnemyCard) {
-	
+AttackAction::AttackAction(State* state, Card* pMyCard, Card* pEnemyCard) : Action(0, state), myCard(pMyCard), enemyCard(pEnemyCard) {
+
 	Calculator calc;
 	value = 0.f;
 	cardInstanceID = pMyCard->instanceId;
@@ -1040,7 +1068,7 @@ AttackAction::AttackAction(State* state, Card* pMyCard,  Card* pEnemyCard) : Act
 		value = GameConstants::FaceAttackVal;
 		return;
 	}
-	
+
 	if (enemyCard->abilities & Card::Abilities::Ward) {
 		if (myCard->attack != 0) {
 			value += pEnemyCard->defense / myCard->attack;
@@ -1050,11 +1078,14 @@ AttackAction::AttackAction(State* state, Card* pMyCard,  Card* pEnemyCard) : Act
 		if (myCard->attack >= enemyCard->defense || myCard->abilities & Card::Abilities::Lethal) {
 			value += calc.CalcCardPower(*enemyCard);
 			needToEraseEnemy = true;
+			if (myCard->attack == pEnemyCard->attack && myCard->defense == pEnemyCard->defense) {
+				value += 1.f;
+			}
 		}
 	}
 
 
-	if (enemyCard->abilities & Card::Abilities::Lethal || 
+	if (enemyCard->abilities & Card::Abilities::Lethal ||
 		(!(myCard->abilities & Card::Abilities::Ward) && enemyCard->attack >= myCard->defense)) {
 		value -= calc.CalcCardPower(*myCard);
 		needToErase = true;
@@ -1068,44 +1099,42 @@ AttackAction::AttackAction(State* state, Card* pMyCard,  Card* pEnemyCard) : Act
 
 }
 
-void AttackAction::Perform(ostream& s) 
+void AttackAction::Perform(ostream& s)
 {
 	s << "ATTACK " << cardInstanceID << " " << enemyInstanceID << ";";
-	if (needToErase) m_State->RemoveMyCard(cardInstanceID);
-	if(enemyCard && needToEraseEnemy)
-		m_State->RemoveEnemyCard(enemyInstanceID);
+	if (needToErase) m_State->RemoveMyCardFromBoard(myCard);
+	else myCard->canAttack = false;
+	if (enemyCard && needToEraseEnemy)
+		m_State->RemoveEnemyCard(enemyCard);
 }
 
-SummonAction::SummonAction(State* state,  Card* card) : Action(card->cost,state), summonCard(card) {
-	
+SummonAction::SummonAction(State* state, Card* card) : Action(card->cost, state), summonCard(card) {
+
 
 
 	this->summonCardId = card->instanceId;
 	value += Calculator().CalcCardPower(*card);
 }
 
-void SummonAction::Perform(ostream& s) 
+void SummonAction::Perform(ostream& s)
 {
 	s << "SUMMON " << summonCardId << ";";
+	m_State->players[Me].SpendMana(summonCard->cost);
 	m_State->myBoard.push_back(*summonCard);
-	int c = -1;
-	for (int i = 0; i < m_State->myHand.size(); ++i) {
-		if (m_State->myHand[i].instanceId == summonCardId)
-			c = i;
 
-	}
-	if(c != -1)
-		m_State->myHand.erase(m_State->myHand.begin() + c);
+	m_State->RemoveMyCardFromHand(summonCard);
+
+
 
 }
 
-UseAction::UseAction(State* state, Card* myCard,  Card* pTarget) : Action(myCard->cost,  state ), myCard(myCard), target(pTarget) {
+UseAction::UseAction(State* state, Card* myCard, Card* pTarget) : Action(myCard->cost, state), myCard(myCard), target(pTarget) {
 
 	myCardInstanceID = myCard->instanceId;
 	enemyCardInstanceID = -1;
 	if (pTarget)
 		enemyCardInstanceID = pTarget->instanceId;
-	
+
 	if (!target)
 		value = 0.f;
 	if (myCard->type == Card::Type::RedItem || myCard->type == Card::Type::BlueItem) {
@@ -1113,17 +1142,26 @@ UseAction::UseAction(State* state, Card* myCard,  Card* pTarget) : Action(myCard
 			value += target->defense / abs(myCard->defense);
 		}
 		else {
-			float diff = myCard->defense + target->defense;
-			if (diff < 0) {
-				value += diff / 2;
-				needToRemoveEnemy = true;
-			}
-			else if (!diff) {
-				value += 1.5;
-				needToRemoveEnemy = true;
+			if (myCard->cardId == 23) {
+				Calculator calc;
+				auto power = calc.CalcCardPower(*pTarget);
+				if (power >= 15)
+					value += 10.f;
 			}
 			else {
-				value -= myCard->defense;
+
+				float diff = myCard->defense + target->defense;
+				if (diff < 0) {
+					value += diff / 2;
+					needToRemoveEnemy = true;
+				}
+				else if (!diff) {
+					value += 1.5;
+					needToRemoveEnemy = true;
+				}
+				else {
+					value -= myCard->defense;
+				}
 			}
 		}
 	}
@@ -1133,23 +1171,17 @@ UseAction::UseAction(State* state, Card* myCard,  Card* pTarget) : Action(myCard
 
 }
 
-void UseAction::Perform(ostream& s) 
+void UseAction::Perform(ostream& s)
 {
 
-	s << "USE " << myCardInstanceID << " " <<enemyCardInstanceID << ";";
-	int c = 0;
-	for (int i = 0; i < m_State->myHand.size(); ++i) {
-		if (m_State->myHand[i] == *myCard)
-			c = i;
-
-	}
-
-	m_State->myHand.erase(m_State->myHand.begin() + c);
-	if (needToRemoveEnemy)
-		m_State->RemoveEnemyCard(enemyCardInstanceID);
+	s << "USE " << myCardInstanceID << " " << enemyCardInstanceID << ";";
+	if (myCard)
+		m_State->RemoveMyCardFromHand(this->myCard);
+	if (needToRemoveEnemy && target)
+		m_State->RemoveEnemyCard(target);
 }
 
-ComplicatedAction::ComplicatedAction(State* state,	Action* first, Action* second) : Action(first->GetCost() + second->GetCost(),state)
+ComplicatedAction::ComplicatedAction(State* state, Action* first, Action* second) : Action(first->GetCost() + second->GetCost(), state)
 {
 
 	value = first->GetValue() + second->GetValue();
@@ -1159,21 +1191,21 @@ ComplicatedAction::ComplicatedAction(State* state,	Action* first, Action* second
 
 }
 
-void ComplicatedAction::Perform(ostream& s) 
+void ComplicatedAction::Perform(ostream& s)
 {
 	for (const auto& action : subActions)
 		action->Perform(s);
 }
 
-void PassAction::Perform(ostream& s) 
+void PassAction::Perform(ostream& s)
 {
 	s << "PASS";
 
 }
 
-void PickAction::Perform(ostream& s) 
+void PickAction::Perform(ostream& s)
 {
-	s << "PICK " << cardNum ;
+	s << "PICK " << cardNum;
 }
 
 
@@ -1182,15 +1214,15 @@ int main()
 {
 	/*turnStartPoint = high_resolution_clock::now();
 	BitStream bs;
-	bs.initRead("81614U4O4GEa0W68G02060O0GX14008A2G1Y000o3W7ES004FXO8n300004IG4GGW02R3K0280G40");
+	bs.initRead("7q4H4BEF8GMN0X51C00_7nOP0J60038Q0Svm00GX7W48C010CYu1pd0011io6C4mH00X3a484000gGP1I10018egGKf002Io8a7ES004iYL1pd0010");
 	State s;
 	s.read(bs);
 	Agent a;
 	a.ChangeState(s);
 	a.Think();
 	high_resolution_clock::time_point turnEnd = high_resolution_clock::now();
-	cerr << "Turn time " << duration_cast<milliseconds>(turnEnd - turnStartPoint).count() << '\n';
-*/
+	cerr << "Turn time " << duration_cast<milliseconds>(turnEnd - turnStartPoint).count() << '\n';*/
+
 
 	while (1) {
 		turnStartPoint = high_resolution_clock::now();

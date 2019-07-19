@@ -238,10 +238,7 @@ enum {
 };
 class State;
 class ComplicatedAction;
-class AttackAction;
-class UseAction;
 class Action {
-
 protected:
 	static uint32_t s_ActionsCount;
 	State* m_State;
@@ -259,29 +256,54 @@ public:
 	int GetCost() const { return Cost; }
 	int GetValue() const { return value; }
 	virtual void Perform(ostream& s)  = 0;
-	virtual bool IsEquals(const Action& another)const { return another.id == id; }
-	virtual bool IsEquals(const AttackAction& another)const;
-	virtual bool IsEquals(const UseAction& another)const;
-	virtual bool IsEquals(const ComplicatedAction& another) const;
 	friend class State;
+	virtual bool IsEqual(Action & another) = 0;
 	//virtual ~Action() {};
 };
 
+class ComplicatedAction :public Action {
+	vector<Action* > subActions;
+public:
+	ComplicatedAction(State* state, Action* first, Action* second);
+	virtual void Perform(ostream& s)  override;
+
+	const vector<Action*>& GetSubs() const { return subActions; }
+	virtual bool IsEqual(Action& another) override {
+		for (auto& action : subActions) {
+			if (action->IsEqual(another))
+				return true;
+		}
+		return false;
+	}
+};
 
 uint32_t Action::s_ActionsCount = 0;
 class SummonAction : public Action {
 private:
-	 Card* summonCard;
+	 Card* summonCard = nullptr;
+	 int summonCardId = -1;
 public:
 	friend class State;
 	SummonAction(State* state, Card* card);
 	virtual void Perform(ostream& s)  override;
+	virtual bool IsEqual(Action& another) override {
+		if (SummonAction * ac = dynamic_cast<SummonAction*>(&another)) {
+			return this->summonCardId == ac->summonCardId;
+		}
+		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
+			for (auto& kek : comp->GetSubs()) {
+				if (IsEqual(*kek))
+					return true;
+			}
+		}
+		return false;
+	}
 };
 
-class AttackAction : public Action {
+class AttackAction final : public Action {
 private:
-	 Card* myCard;
-	 Card* enemyCard;
+	 Card* myCard = nullptr;
+	 Card* enemyCard = nullptr;
 
 	 bool needToErase = false;
 	 bool needToEraseEnemy = false;
@@ -290,58 +312,60 @@ private:
 public:
 	AttackAction(State * state, Card* myCard,  Card* enemyCard = nullptr);
 	virtual void Perform(ostream& s) override;
-	virtual bool IsEquals(const AttackAction& another)const;
+	int GetCardInstanceID() const { return cardInstanceID; }
+	virtual bool IsEqual(Action& another) override {
+		if (AttackAction * ac = dynamic_cast<AttackAction*>(&another)) {
+			return this->cardInstanceID == ac->cardInstanceID;
+		}
+		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
+			for (auto& kek : comp->GetSubs()) {
+				if (IsEqual(*kek))
+					return true;
+			}
+		}
+		return false;
+	}
 };
 
-
 class PickAction : public Action {
-	int cardNum;
+	int cardNum = -1;
 public:
 	PickAction(int cardNumber) :Action(0,nullptr), cardNum(cardNumber) {}
 	virtual void Perform(ostream& s) override;
+	virtual bool IsEqual(Action& another) override { return id == another.GetId(); }
 };
 
 class UseAction : public Action {
 private:
 	 Card* myCard;
 	 Card* target;
-	 int myCardInstanceID;
-	 int enemyCardInstanceID;
+	 int myCardInstanceID = -1;
+	 int enemyCardInstanceID = -1;
 	 bool needToRemoveEnemy = false;
 public:
 	UseAction(State * state, Card* myCard,  Card* enemyCard = nullptr);
 	virtual void Perform(ostream& s) override;
-	virtual bool IsEquals(const UseAction& another)const override;
+	int GetCardInstanceID() const { return myCardInstanceID; }
+	virtual bool IsEqual(Action& another) override {
+		if (UseAction * ac = dynamic_cast<UseAction*>(&another)) {
+			return this->myCardInstanceID == ac->myCardInstanceID;
+		}
+		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
+			for (auto& kek : comp->GetSubs()) {
+				if (IsEqual(*kek))
+					return true;
+			}
+		}
+		return false;
+	}
 };
 
 class PassAction : public Action {
 public:
 	PassAction() :Action(0,nullptr){};
 	virtual void Perform(ostream& s) override;
+	virtual bool IsEqual(Action& another) override { return false; }
 };
-class ComplicatedAction :public Action {
-	vector<Action* > subActions;
-public:
-	ComplicatedAction(State * state,Action* first, Action* second);
-	virtual void Perform(ostream& s)  override;
-	bool IsEquals(const Action & another) const override {
-
-		for (const auto& action : subActions)
-			if (another.IsEquals(*action))
-				return true;
-		return false;
-	}
-	bool IsEquals(const ComplicatedAction& another) const override {
-
-		for (const auto& action : subActions)
-			for(const auto& anotherSub : another.subActions)
-				if (anotherSub->IsEquals(*action))
-				return true;
-		return false;
-	}
-	const vector<Action*>& GetSubs() const { return subActions; }
-
- };
 
 
 
@@ -433,8 +457,8 @@ public:
 	vector<Action*> GetAllPosibleActions();
 	vector< Card*> GetEnemyTaunts() ;
 	vector< Card*> GetSpells() ;
-	int RemoveEnemyCard(Card& enemyCard);
-	int RemoveMyCard(Card& myCard);
+	int RemoveEnemyCard(int instanceId);
+	int RemoveMyCard(int instanceId);
 	inline int GetCurrMana() const { return players[Me].GetMana(); }
 	inline const vector<Card>& GetMyHand() const { return myHand; }
 	void read(BitStream& s);
@@ -594,7 +618,7 @@ vector<Action*> State::GetAllPosibleActions()
 
 	vector<Action*> newOutActions;
 	for_each(outActions.begin(), outActions.end(), [&newOutActions](Action* a) {
-		if (a->GetValue() > 0.4) {
+		if (a->GetValue() >= 0.f) {
 			newOutActions.push_back(a);
 		}
 		});
@@ -632,15 +656,27 @@ vector<Action*> State::CheckLetal() {
 	}
 	return actions;
 }
-int State::RemoveEnemyCard(Card& enemyCard)
+int State::RemoveEnemyCard(int instanceId)
 {
-	enemyBoard.erase(remove(enemyBoard.begin(), enemyBoard.end(), enemyCard));
+	int index = -1;
+	for (uint32_t i = 0; i < enemyBoard.size(); ++i)
+		if (enemyBoard[i].instanceId == instanceId)
+			index = i;
+
+	if (index != -1)
+		enemyBoard.erase(enemyBoard.begin() + index);
 	return 1;
 }
 
-int State::RemoveMyCard(Card& myCard)
+int State::RemoveMyCard(int instanceId)
 {
-	myBoard.erase(remove(myBoard.begin(), myBoard.end(), myCard));
+	int index = -1;
+	for (uint32_t i = 0; i < myBoard.size(); ++i)
+		if (myBoard[i].instanceId == instanceId)
+			index = i;
+
+	if (index != -1)
+		myBoard.erase(myBoard.begin() + index);
 	return 1;
 }
 void State::read(BitStream& s) {
@@ -777,6 +813,8 @@ Calculator::Calculator()
 
 	valueCalcFunctions.insert(make_pair(Card::Type::GreenItem, [&](const Card& c) {
 		float value = 0.f;
+		if (c.cost == 0.f)
+			return value;
 		for (const auto& it : allAbilities)
 			if (c.abilities & it.first)
 				value += it.second;
@@ -816,7 +854,7 @@ Calculator::Calculator()
 		float value = 0.f;
 		for (const auto& it : allAbilities)
 			if (c.abilities & it.first)
-				value += it.second * c.cost;
+				value += it.second * (c.cost ? c.cost : 1.F);
 		value += c.attack;
 		value += c.defense;
 
@@ -915,23 +953,23 @@ void Agent::Think()
 	//		lol->Perform(cout);
 	//	return;
 	//}
-
+	bool wasTaunts = !m_State.GetEnemyTaunts().empty();
 	auto population = m_State.GetAllPosibleActions();
 	if (population.empty()) {
 		PassAction().Perform(cout);
 		cout << '\n';
 		return;
 	}
-	if (!m_State.GetEnemyTaunts().size());
-		StartSelection(population);
+	StartSelection(population);
 
-
-	population = m_State.GetAllPosibleActions();
-	if (population.empty()) {
-		PassAction().Perform(cout);
-		cout << '\n';
-		return;
+	if (wasTaunts) {
+		population = m_State.GetAllPosibleActions();
+		if(!population.empty()) { StartSelection(population); }
+			
 	}
+	
+
+
 
 	cout << '\n';
 	
@@ -946,7 +984,7 @@ void Agent::StartSelection(vector<Action*>& population) {
 		});
 	float lastIterationMaxFitness = 0;
 
-	while (generationCout < 50) {
+	while (generationCout < 30) {
 		//while(generationCout < 300) {
 
 		vector<Action* > bestActions;
@@ -966,7 +1004,7 @@ void Agent::StartSelection(vector<Action*>& population) {
 			tempSel = rand() % (popIsBig ? bestActions.size() : population.size());
 
 			Action* addAct = popIsBig ? bestActions[tempSel] : population[tempSel];//Action operator ==
-			if (addAct->IsEquals(*curr)) continue;
+			if ((*addAct).IsEqual(*curr)) continue;
 			if (m_State.GetCurrMana() < addAct->GetCost() + curr->GetCost()) continue;
 			if (population.size() >= GameConstants::MaxPopCount) break;
 			population.push_back(new ComplicatedAction(&m_State,addAct, curr));
@@ -976,8 +1014,8 @@ void Agent::StartSelection(vector<Action*>& population) {
 		sort(population.begin(), population.end(), [](const Action* const left, const Action* const right) {
 			return left->GetValue() > right->GetValue();
 			});
-			if (lastIterationMaxFitness == population.front()->GetValue())
-				break;
+			/*if (lastIterationMaxFitness == population.front()->GetValue())
+				break;*/
 			lastIterationMaxFitness = population.front()->GetValue();
 		currTime = high_resolution_clock::now();
 	}
@@ -990,33 +1028,6 @@ void Agent::StartSelection(vector<Action*>& population) {
 
 
 ////////////////////////////////////////ACTIONS IMPLEMENTATION//////////////////////////////
-bool AttackAction::IsEquals(const AttackAction& another) const
-{
-	return id == another.id || cardInstanceID == another.cardInstanceID;
-}
-bool UseAction::IsEquals(const UseAction& another) const
-{
-	return id == another.GetId() || myCardInstanceID == another.myCardInstanceID;
-}
-
-bool Action::IsEquals(const AttackAction& another) const
-{
-	return id == another.GetId();
-}
-
-bool Action::IsEquals(const UseAction& another) const
-{
-	return id == another.GetId();
-}
-
-bool Action::IsEquals(const ComplicatedAction& another) const {
-	for (const auto& action : another.GetSubs()) {
-		if (IsEquals(*action))
-			return true;
-
-		return false;
-	}
-}
 
 AttackAction::AttackAction(State* state, Card* pMyCard,  Card* pEnemyCard) : Action(0,state), myCard(pMyCard), enemyCard(pEnemyCard) {
 	
@@ -1060,31 +1071,31 @@ AttackAction::AttackAction(State* state, Card* pMyCard,  Card* pEnemyCard) : Act
 void AttackAction::Perform(ostream& s) 
 {
 	s << "ATTACK " << cardInstanceID << " " << enemyInstanceID << ";";
-	if (needToErase) m_State->RemoveMyCard(*myCard);
+	if (needToErase) m_State->RemoveMyCard(cardInstanceID);
 	if(enemyCard && needToEraseEnemy)
-		m_State->RemoveEnemyCard(*enemyCard);
+		m_State->RemoveEnemyCard(enemyInstanceID);
 }
 
 SummonAction::SummonAction(State* state,  Card* card) : Action(card->cost,state), summonCard(card) {
 	
 
 
-	
+	this->summonCardId = card->instanceId;
 	value += Calculator().CalcCardPower(*card);
 }
 
 void SummonAction::Perform(ostream& s) 
 {
-	s << "SUMMON " << summonCard->instanceId << ";";
+	s << "SUMMON " << summonCardId << ";";
 	m_State->myBoard.push_back(*summonCard);
-	int c = 0;
+	int c = -1;
 	for (int i = 0; i < m_State->myHand.size(); ++i) {
-		if (m_State->myHand[i] == *summonCard)
+		if (m_State->myHand[i].instanceId == summonCardId)
 			c = i;
 
 	}
-
-	m_State->myHand.erase(m_State->myHand.begin() + c);
+	if(c != -1)
+		m_State->myHand.erase(m_State->myHand.begin() + c);
 
 }
 
@@ -1135,7 +1146,7 @@ void UseAction::Perform(ostream& s)
 
 	m_State->myHand.erase(m_State->myHand.begin() + c);
 	if (needToRemoveEnemy)
-		m_State->RemoveEnemyCard(*target);
+		m_State->RemoveEnemyCard(enemyCardInstanceID);
 }
 
 ComplicatedAction::ComplicatedAction(State* state,	Action* first, Action* second) : Action(first->GetCost() + second->GetCost(),state)
@@ -1169,9 +1180,9 @@ void PickAction::Perform(ostream& s)
 
 int main()
 {
-	turnStartPoint = high_resolution_clock::now();
+	/*turnStartPoint = high_resolution_clock::now();
 	BitStream bs;
-	bs.initRead("7YbH4U8L4GIU0XZ1G000D0O34800FpGA0n2003y26Wa0OW008I80nZ0011qEG4OW00IF7a48K000YHb0nX00010XGGmW000");
+	bs.initRead("81614U4O4GEa0W68G02060O0GX14008A2G1Y000o3W7ES004FXO8n300004IG4GGW02R3K0280G40");
 	State s;
 	s.read(bs);
 	Agent a;
@@ -1179,6 +1190,8 @@ int main()
 	a.Think();
 	high_resolution_clock::time_point turnEnd = high_resolution_clock::now();
 	cerr << "Turn time " << duration_cast<milliseconds>(turnEnd - turnStartPoint).count() << '\n';
+*/
+
 	while (1) {
 		turnStartPoint = high_resolution_clock::now();
 		Agent s(cin);
@@ -1198,3 +1211,6 @@ int main()
 
 // taunts problem
 // time resource problem need optimize
+//////////////////////////////////TODO/////////////////
+//better to place several small minoin then big one which can be easily killed by existing enemy minion
+//bad spells sometimes

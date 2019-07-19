@@ -305,7 +305,7 @@ class AttackAction final : public Action {
 private:
 	Card* myCard = nullptr;
 	Card* enemyCard = nullptr;
-
+	int notEnougthDamage = -100;
 	bool needToErase = false;
 	bool needToEraseEnemy = false;
 	int cardInstanceID = -1;
@@ -331,6 +331,7 @@ public:
 		}
 		return false;
 	}
+	friend ComplicatedAction;
 };
 
 class PickAction : public Action {
@@ -348,6 +349,7 @@ private:
 	int myCardInstanceID = -1;
 	int enemyCardInstanceID = -1;
 	bool needToRemoveEnemy = false;
+	int notEnougthDamage = -100;
 public:
 	UseAction(State* state, Card* myCard, Card* enemyCard = nullptr);
 	virtual void Perform(ostream& s) override;
@@ -364,6 +366,8 @@ public:
 		}
 		return false;
 	}
+	friend ComplicatedAction;
+
 };
 
 class PassAction : public Action {
@@ -377,12 +381,12 @@ public:
 
 class Calculator {
 	const std::map<Card::Abilities, float> allAbilities = {
-		{Card::Abilities::Breakthrough,0.3f},
+		{Card::Abilities::Breakthrough,0.5f},
 	{Card::Abilities::Charge,0.7f},
-	{Card::Abilities::Drain,0.3f},
-	{Card::Abilities::Guard,1.f},
+	{Card::Abilities::Drain,0.5f},
+	{Card::Abilities::Guard,1.2f},
 	{Card::Abilities::Lethal,1.2f},
-	{Card::Abilities::Ward,1.5f} };
+	{Card::Abilities::Ward,2.f} };
 
 	map<Card::Type, function<float(const Card&)>> valueCalcFunctions;
 	map<Card::Type, function<float(const Card&)>> powerCalcFunctions;
@@ -474,11 +478,15 @@ public:
 	void write(BitStream& s);
 	vector<Action*> CheckLetal();
 	GameState state;
+
+	bool HaveWeCharge();
 	State(istream& i);
 	State() = default;
 	friend class Action;
 	friend class SummonAction;
 	friend class UseAction;
+	friend class AttackAction;
+	friend class ComplicatedAction;
 };
 
 
@@ -634,6 +642,12 @@ vector<Action*> State::GetAllPosibleActions()
 	return newOutActions;
 }
 ///////////////////////////STATE IMPLEMENTATION///////////////////////
+bool State::HaveWeCharge() {
+	for (auto& card : myBoard)
+		if (card.abilities & Card::Abilities::Charge)
+			return true;
+	return false;
+}
 vector<Action*> State::CheckLetal() {
 	if (!GetEnemyTaunts().empty())
 		return {};
@@ -644,7 +658,6 @@ vector<Action*> State::CheckLetal() {
 		damage += card.attack;
 		actions.push_back(new AttackAction(this, &card));
 	}
-
 	for (auto& spell : myHand) {
 		if (spell.cost > players[Me].GetMana()) continue;
 		if (spell.type == Card::Type::BlueItem) {
@@ -787,6 +800,10 @@ State::State(istream& i)
 
 }
 
+
+
+////////////////////////////////CALCULATOR IMPLEMENTATION/////////////////////////////
+
 float Calculator::CalcCardPower(const Card& card) const
 {
 	return powerCalcFunctions.find(card.type)->second(card);
@@ -802,14 +819,13 @@ float Calculator::CalcCardValue(const Card& c) const
 	return 0.0f;
 }
 
-
-////////////////////////////////CALCULATOR IMPLEMENTATION/////////////////////////////
 Calculator::Calculator()
 {
 	valueCalcFunctions.insert(make_pair(Card::Type::Creature, [&](const Card& c) {
 		float value = 0.f;
 		if (c.attack == 0 || c.cost == 0)
 			return value;
+
 		for (const auto& it : allAbilities)
 			if (c.abilities & it.first)
 				value += it.second;
@@ -818,12 +834,12 @@ Calculator::Calculator()
 		value += c.cardDraw;
 		value += c.myHealthChange / 4;
 		value += c.opponentHealthChange / 4;
-		if (c.cost < 3)
-			value -= 1.f;
+		/*	if (c.cost < 2)
+				value -= 0.7f;*/
 		if (c.defense / c.attack >= 3 || c.attack / c.defense >= 3)
 			value -= 1.5;
 		if (c.cost >= 8)
-			value -= 0.7f;
+			value -= 0.5f;
 		return value;
 		}));
 
@@ -837,6 +853,7 @@ Calculator::Calculator()
 		value += c.myHealthChange / 2;
 		value += c.opponentHealthChange / 2;
 		value += 1 / c.cost;
+		value -= 1.5f;
 		return value;
 		}));
 
@@ -844,7 +861,7 @@ Calculator::Calculator()
 
 	valueCalcFunctions.insert(make_pair(Card::Type::GreenItem, [&](const Card& c) {
 		float value = 0.f;
-		if (c.cost == 0.f)
+		if (c.cost == 0.f || c.attack == 0.f || c.defense == 0.f)
 			return value;
 		for (const auto& it : allAbilities)
 			if (c.abilities & it.first)
@@ -856,7 +873,6 @@ Calculator::Calculator()
 		value += c.opponentHealthChange / 4;
 		if (c.cost < 3)
 			value -= 1.f;
-		value += 0.75;
 		return value;
 		}));
 
@@ -878,6 +894,7 @@ Calculator::Calculator()
 		value += c.opponentHealthChange / 4;
 		if (c.cost < 3)
 			value -= 1.f;
+		value -= 2.8f;
 		return value;
 		}));
 
@@ -889,7 +906,6 @@ Calculator::Calculator()
 				value += it.second * (c.cost ? c.cost : 1.F);
 		value += c.attack;
 		value += c.defense;
-
 		return value;
 		}));
 
@@ -960,6 +976,8 @@ void Agent::Draft()
 			biggestVal = val;
 		}
 		i++;
+
+		cerr << "Card id " << elem.cardId << " card value " << val << '\n';
 	}
 
 
@@ -975,12 +993,19 @@ Agent::Agent(istream& a) : m_State(a)
 void Agent::Think()
 {
 	if (m_State.state == GameState::DRAFT) {
-		cerr << "In Draft\n";
+
 		Draft();
 		cout << '\n';
 		return;
 	}
 
+	auto letal = m_State.CheckLetal();
+	if (!letal.empty()) {
+		for (auto* action : letal)
+			action->Perform(cout);
+		cout << '\n';
+		return;
+	}
 	bool wasTaunts = !m_State.GetEnemyTaunts().empty();
 	auto population = m_State.GetAllPosibleActions();
 	if (population.empty()) {
@@ -990,9 +1015,18 @@ void Agent::Think()
 	}
 	StartSelection(population);
 
-	if (wasTaunts) {
+	if (wasTaunts || m_State.HaveWeCharge()) {
 		population = m_State.GetAllPosibleActions();
-		if (!population.empty()) { StartSelection(population); }
+
+		if (!population.empty()) {
+			StartSelection(population);
+			letal = m_State.CheckLetal();
+			if (!letal.empty()) {
+				for (auto* action : letal)
+					action->Perform(cout);
+				return;
+			}
+		}
 
 	}
 
@@ -1010,10 +1044,7 @@ void Agent::StartSelection(vector<Action*>& population) {
 	sort(population.begin(), population.end(), [](const Action* const left, const Action* const right) {
 		return left->GetValue() > right->GetValue();
 		});
-	float lastIterationMaxFitness = 0;
-
 	while (generationCout < 30) {
-		//while(generationCout < 300) {
 
 		vector<Action* > bestActions;
 		bool popIsBig = population.size() > 2;
@@ -1022,33 +1053,30 @@ void Agent::StartSelection(vector<Action*>& population) {
 		}
 
 		int popSize = population.size();
+		bool first = false;
 
 		for (int i = (popIsBig ? 2 : 0); i < popSize; ++i) {
-			srand(NULL);
+
 			Action* curr = population[i];
-			int tempSel = 0;
 
 
-			tempSel = rand() % (popIsBig ? bestActions.size() : population.size());
 
-			Action* addAct = popIsBig ? bestActions[tempSel] : population[tempSel];//Action operator ==
+			Action* addAct = popIsBig ? bestActions[first] : population[first];//Action operator ==
 			if ((*addAct).IsEqual(*curr)) continue;
 			if (m_State.GetCurrMana() < addAct->GetCost() + curr->GetCost()) continue;
 			if (population.size() >= GameConstants::MaxPopCount) break;
 			population.push_back(new ComplicatedAction(&m_State, addAct, curr));
+			first = !first;
 		}
 		generationCout++;
 
 		sort(population.begin(), population.end(), [](const Action* const left, const Action* const right) {
 			return left->GetValue() > right->GetValue();
 			});
-		/*if (lastIterationMaxFitness == population.front()->GetValue())
-			break;*/
-		lastIterationMaxFitness = population.front()->GetValue();
+
 		currTime = high_resolution_clock::now();
 	}
 
-	cerr << "gen: " << generationCout << '\n';
 	population.front()->Perform(cout);
 	for (auto* p : population)
 		delete p;
@@ -1066,12 +1094,15 @@ AttackAction::AttackAction(State* state, Card* pMyCard, Card* pEnemyCard) : Acti
 	if (!enemyCard)
 	{
 		value = GameConstants::FaceAttackVal;
+		notEnougthDamage = m_State->players[Opponent].GetHealth() - myCard->attack;
 		return;
 	}
 
 	if (enemyCard->abilities & Card::Abilities::Ward) {
 		if (myCard->attack != 0) {
 			value += pEnemyCard->defense / myCard->attack;
+			if (myCard->attack <= 2 && enemyCard->attack > 5)
+				value += 4;
 		}
 	}
 	else {
@@ -1081,6 +1112,9 @@ AttackAction::AttackAction(State* state, Card* pMyCard, Card* pEnemyCard) : Acti
 			if (myCard->attack == pEnemyCard->attack && myCard->defense == pEnemyCard->defense) {
 				value += 1.f;
 			}
+		}
+		else {
+			notEnougthDamage = enemyCard->defense - myCard->attack;
 		}
 	}
 
@@ -1120,6 +1154,11 @@ void SummonAction::Perform(ostream& s)
 {
 	s << "SUMMON " << summonCardId << ";";
 	m_State->players[Me].SpendMana(summonCard->cost);
+	summonCard->location = Card::Location::OnBoard;
+	if (summonCard->abilities & Card::Abilities::Charge)
+		summonCard->canAttack = true;
+	else
+		summonCard->canAttack = false;
 	m_State->myBoard.push_back(*summonCard);
 
 	m_State->RemoveMyCardFromHand(summonCard);
@@ -1135,8 +1174,12 @@ UseAction::UseAction(State* state, Card* myCard, Card* pTarget) : Action(myCard-
 	if (pTarget)
 		enemyCardInstanceID = pTarget->instanceId;
 
-	if (!target)
+	if (!target) {
 		value = 0.f;
+		notEnougthDamage = m_State->players[Opponent].GetHealth() + myCard->defense;
+		return;
+	}
+
 	if (myCard->type == Card::Type::RedItem || myCard->type == Card::Type::BlueItem) {
 		if (target->abilities & Card::Abilities::Ward) {
 			value += target->defense / abs(myCard->defense);
@@ -1154,19 +1197,27 @@ UseAction::UseAction(State* state, Card* myCard, Card* pTarget) : Action(myCard-
 				if (diff < 0) {
 					value += diff / 2;
 					needToRemoveEnemy = true;
+					if (target->attack > 6)
+						value += 10.f;
 				}
 				else if (!diff) {
 					value += 1.5;
 					needToRemoveEnemy = true;
+					if (target->attack > 6)
+						value += 10.f;
 				}
 				else {
 					value -= myCard->defense;
+					notEnougthDamage = diff;
 				}
 			}
 		}
 	}
 	else {
 		value = 3.f;
+		if (target->abilities & Card::Abilities::Guard && m_State->players[Me].GetHealth() < 15)
+			value += 10.f;
+
 	}
 
 }
@@ -1177,14 +1228,95 @@ void UseAction::Perform(ostream& s)
 	s << "USE " << myCardInstanceID << " " << enemyCardInstanceID << ";";
 	if (myCard)
 		m_State->RemoveMyCardFromHand(this->myCard);
+	target->attack += myCard->attack;
+	target->defense += myCard->defense;
 	if (needToRemoveEnemy && target)
 		m_State->RemoveEnemyCard(target);
+
 }
 
 ComplicatedAction::ComplicatedAction(State* state, Action* first, Action* second) : Action(first->GetCost() + second->GetCost(), state)
 {
 
 	value = first->GetValue() + second->GetValue();
+	Calculator calc;
+	value = first->GetValue() + second->GetValue();
+	if (AttackAction * firstAttack = dynamic_cast<AttackAction*> (first)) {
+		if (AttackAction * secondAttack = dynamic_cast<AttackAction*> (second)) {
+			if (firstAttack->enemyCard == secondAttack->enemyCard) {
+				if (firstAttack->notEnougthDamage != -100 || secondAttack->notEnougthDamage != -100) {
+					if (firstAttack->enemyCard) {
+						if ((firstAttack->myCard->attack + secondAttack->myCard->attack) >= firstAttack->enemyCard->defense) {
+							value += calc.CalcCardPower(*firstAttack->enemyCard);
+						}
+					}
+					else {
+						if ((firstAttack->myCard->attack + secondAttack->myCard->attack) >= m_State->players[Opponent].GetHealth())
+						{
+							value += 100;
+						}
+					}
+
+				}
+			}
+		}
+		else if (UseAction * secondUse = dynamic_cast<UseAction*> (second)) {
+			if (firstAttack->enemyCard == secondUse->target) {
+				if (firstAttack->notEnougthDamage != -100 || secondUse->notEnougthDamage != -100) {
+					if (firstAttack->enemyCard) {
+						if ((firstAttack->myCard->attack - secondUse->myCard->defense) >= firstAttack->enemyCard->defense) {
+							value += calc.CalcCardPower(*firstAttack->enemyCard);
+						}
+					}
+					else {
+						if ((firstAttack->myCard->attack - secondUse->myCard->defense) >= m_State->players[Opponent].GetHealth())
+						{
+							value += 100;
+						}
+					}
+
+				}
+			}
+		}
+	}
+	else if (UseAction * firstUse = dynamic_cast<UseAction*> (first)) {
+		if (AttackAction * secondAttack = dynamic_cast<AttackAction*> (second)) {
+			if (firstUse->target == secondAttack->enemyCard) {
+				if (firstUse->notEnougthDamage != -100 || secondAttack->notEnougthDamage != -100) {
+					if (firstUse->target) {
+						if ((-firstUse->myCard->defense + secondAttack->myCard->attack) >= firstUse->target->defense) {
+							value += calc.CalcCardPower(*firstUse->target);
+						}
+					}
+					else {
+						if ((-firstUse->myCard->defense + secondAttack->myCard->attack) >= m_State->players[Opponent].GetHealth())
+						{
+							value += 100;
+						}
+					}
+
+				}
+			}
+		}
+		else if (UseAction * secondUse = dynamic_cast<UseAction*> (second)) {
+			if (firstUse->target == secondUse->target) {
+				if (firstUse->notEnougthDamage != -100 || secondUse->notEnougthDamage != -100) {
+					if (firstUse->target) {
+						if ((-firstUse->myCard->defense + -secondUse->myCard->defense) >= firstUse->target->defense) {
+							value += calc.CalcCardPower(*firstUse->target);
+						}
+					}
+					else {
+						if ((-firstUse->myCard->defense + -secondUse->myCard->defense) >= m_State->players[Opponent].GetHealth())
+						{
+							value += 100;
+						}
+					}
+				}
+			}
+		}
+	}
+
 	subActions.push_back(first);
 	subActions.push_back(second);
 
@@ -1214,7 +1346,7 @@ int main()
 {
 	/*turnStartPoint = high_resolution_clock::now();
 	BitStream bs;
-	bs.initRead("7q4H4BEF8GMN0X51C00_7nOP0J60038Q0Svm00GX7W48C010CYu1pd0011io6C4mH00X3a484000gGP1I10018egGKf002Io8a7ES004iYL1pd0010");
+	bs.initRead("7b3186IE0GSO0X71S0108WO1Hb00G04M2GHG000uCWY200022pe900000pC-0GPG008GGW8GW01a1aO91200G28AGKPG0024Da6EK001e2P0nY00G8mDGOeW02WEFK4I40005Hb1J50000");
 	State s;
 	s.read(bs);
 	Agent a;

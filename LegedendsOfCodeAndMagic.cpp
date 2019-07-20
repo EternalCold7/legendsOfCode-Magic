@@ -427,6 +427,7 @@ public:
 	int GetMana() const { return mana; }
 	void SpendMana(int minus) { mana -= minus; }
 	int GetHealth() const { return health; }
+	void DecreesHealth(int amount) { health -= amount; };
 	Player(istream& i);
 	Player() = default;
 	void read(BitStream& bs);
@@ -667,9 +668,11 @@ vector<Action*> State::CheckLetal() {
 			actions.push_back(new UseAction(this, &spell));
 		}
 		else if (spell.type == Card::Type::RedItem) {
-			if (!enemyBoard.empty())
+			if (!enemyBoard.empty()) {
 				damage += spell.opponentHealthChange;
-			actions.push_back(new UseAction(this, &spell, &enemyBoard.back()));
+				actions.push_back(new UseAction(this, &spell, &enemyBoard.back()));
+			}
+			
 		}
 	}
 
@@ -1024,7 +1027,7 @@ void Agent::Think()
 			if (!letal.empty()) {
 				for (auto* action : letal)
 					action->Perform(cout);
-				return;
+			
 			}
 		}
 
@@ -1129,8 +1132,7 @@ AttackAction::AttackAction(State* state, Card* pMyCard, Card* pEnemyCard) : Acti
 		value += myCard->defense / 2.f + enemyCard->attack / 2.f;
 	}
 
-
-
+	
 }
 
 void AttackAction::Perform(ostream& s)
@@ -1185,7 +1187,7 @@ UseAction::UseAction(State* state, Card* myCard, Card* pTarget) : Action(myCard-
 			value += target->defense / abs(myCard->defense);
 		}
 		else {
-			if (myCard->cardId == 23) {
+			if (myCard->cardId == 151) {
 				Calculator calc;
 				auto power = calc.CalcCardPower(*pTarget);
 				if (power >= 15)
@@ -1228,8 +1230,14 @@ void UseAction::Perform(ostream& s)
 	s << "USE " << myCardInstanceID << " " << enemyCardInstanceID << ";";
 	if (myCard)
 		m_State->RemoveMyCardFromHand(this->myCard);
-	target->attack += myCard->attack;
-	target->defense += myCard->defense;
+	if (target) {
+		target->attack += myCard->attack;
+		target->defense += myCard->defense;
+	}
+	else {
+		m_State->players[Opponent].DecreesHealth(-myCard->defense);
+	}
+		
 	if (needToRemoveEnemy && target)
 		m_State->RemoveEnemyCard(target);
 
@@ -1346,7 +1354,7 @@ int main()
 {
 	/*turnStartPoint = high_resolution_clock::now();
 	BitStream bs;
-	bs.initRead("7b3186IE0GSO0X71S0108WO1Hb00G04M2GHG000uCWY200022pe900000pC-0GPG008GGW8GW01a1aO91200G28AGKPG0024Da6EK001e2P0nY00G8mDGOeW02WEFK4I40005Hb1J50000");
+	bs.initRead("B62145O70GAN3X51C00_7r8P0J6000vM400003yS0a228000hnf0WX0028");
 	State s;
 	s.read(bs);
 	Agent a;

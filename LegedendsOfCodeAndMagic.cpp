@@ -241,19 +241,15 @@ class State;
 class ComplicatedAction;
 class Action {
 protected:
-	static uint32_t s_ActionsCount;
 	State* m_State;
 	Action(int Cost, State* state) : Cost(Cost), m_State(state) {
-		id = s_ActionsCount++;
 	};
 	float value = 0;
 	int Cost = 0;
-	int id;
+
 public:
 	Action(const Action&) = delete;
 	Action(Action&&) = delete;
-	inline int GetId() const { return id; }
-	static void ResetCount() { s_ActionsCount = 0; }
 	int GetCost() const { return Cost; }
 	int GetValue() const { return value; }
 	virtual void Perform(ostream& s) = 0;
@@ -278,22 +274,21 @@ public:
 	}
 };
 
-uint32_t Action::s_ActionsCount = 0;
 class SummonAction : public Action {
 private:
 	Card* summonCard = nullptr;
-	int summonCardId = -1;
+
 public:
 	friend class State;
 	SummonAction(State* state, Card* card);
 	virtual void Perform(ostream& s)  override;
 	virtual bool IsEqual(Action& another) override {
-		if (SummonAction * ac = dynamic_cast<SummonAction*>(&another)) {
-			return this->summonCardId == ac->summonCardId;
+		if (SummonAction * castedToSummon = dynamic_cast<SummonAction*>(&another)) {
+			return this->summonCard == castedToSummon->summonCard;
 		}
 		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
-			for (auto& kek : comp->GetSubs()) {
-				if (IsEqual(*kek))
+			for (auto& sub : comp->GetSubs()) {
+				if (IsEqual(*sub))
 					return true;
 			}
 		}
@@ -308,17 +303,14 @@ private:
 	int notEnougthDamage = -100;
 	bool needToErase = false;
 	bool needToEraseEnemy = false;
-	int cardInstanceID = -1;
-	int enemyInstanceID = -1;
 public:
 	AttackAction(State* state, Card* myCard, Card* enemyCard = nullptr);
 	virtual void Perform(ostream& s) override;
-	int GetCardInstanceID() const { return cardInstanceID; }
 	virtual bool IsEqual(Action& another) override {
 		if (AttackAction * ac = dynamic_cast<AttackAction*>(&another)) {
-			if (cardInstanceID == ac->cardInstanceID)
+			if (myCard == ac->myCard)
 				return true;
-			if (ac->enemyInstanceID == enemyInstanceID)
+			if (ac->enemyCard == enemyCard)
 				if (ac->needToEraseEnemy || needToEraseEnemy)
 					return true;
 			return false;
@@ -339,28 +331,27 @@ class PickAction : public Action {
 public:
 	PickAction(int cardNumber) :Action(0, nullptr), cardNum(cardNumber) {}
 	virtual void Perform(ostream& s) override;
-	virtual bool IsEqual(Action& another) override { return id == another.GetId(); }
+	virtual bool IsEqual(Action& another) override { 
+		assert(false);
+		return false; }
 };
 
 class UseAction : public Action {
 private:
 	Card* myCard;
 	Card* target;
-	int myCardInstanceID = -1;
-	int enemyCardInstanceID = -1;
 	bool needToRemoveEnemy = false;
 	int notEnougthDamage = -100;
 public:
 	UseAction(State* state, Card* myCard, Card* enemyCard = nullptr);
 	virtual void Perform(ostream& s) override;
-	int GetCardInstanceID() const { return myCardInstanceID; }
 	virtual bool IsEqual(Action& another) override {
 		if (UseAction * ac = dynamic_cast<UseAction*>(&another)) {
-			return this->myCardInstanceID == ac->myCardInstanceID;
+			return this->myCard == ac->myCard;
 		}
 		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
-			for (auto& kek : comp->GetSubs()) {
-				if (IsEqual(*kek))
+			for (auto& sub : comp->GetSubs()) {
+				if (IsEqual(*sub))
 					return true;
 			}
 		}
@@ -395,7 +386,6 @@ class Calculator {
 public:
 	float CalcCardValue(const Card& card) const;
 	float CalcCardPower(const Card& card) const;
-	//	float CalcActionValue(const Action& action) const { return 0.f; };
 	Calculator();
 };
 
@@ -492,13 +482,7 @@ public:
 
 
 class Agent {
-
-	struct DNA {
-		int Fitness;
-		Action* action;
-	};
 	State m_State;
-
 	float Fitness(const Action* action);
 	void Draft();
 public:
@@ -1043,7 +1027,6 @@ void Agent::Think()
 void Agent::StartSelection(vector<Action*>& population) {
 	population.reserve(population.size() * 4);
 	int generationCout = 0;
-	high_resolution_clock::time_point currTime = high_resolution_clock::now();
 	sort(population.begin(), population.end(), [](const Action* const left, const Action* const right) {
 		return left->GetValue() > right->GetValue();
 		});
@@ -1076,8 +1059,6 @@ void Agent::StartSelection(vector<Action*>& population) {
 		sort(population.begin(), population.end(), [](const Action* const left, const Action* const right) {
 			return left->GetValue() > right->GetValue();
 			});
-
-		currTime = high_resolution_clock::now();
 	}
 
 	population.front()->Perform(cout);
@@ -1092,8 +1073,7 @@ AttackAction::AttackAction(State* state, Card* pMyCard, Card* pEnemyCard) : Acti
 
 	Calculator calc;
 	value = 0.f;
-	cardInstanceID = pMyCard->instanceId;
-	enemyInstanceID = pEnemyCard ? pEnemyCard->instanceId : -1;
+
 	if (!enemyCard)
 	{
 		value = GameConstants::FaceAttackVal;
@@ -1137,7 +1117,9 @@ AttackAction::AttackAction(State* state, Card* pMyCard, Card* pEnemyCard) : Acti
 
 void AttackAction::Perform(ostream& s)
 {
-	s << "ATTACK " << cardInstanceID << " " << enemyInstanceID << ";";
+	assert(enemyCard);
+	assert(myCard);
+	s << "ATTACK " << myCard->cardId << " " << enemyCard << ";";
 	if (needToErase) m_State->RemoveMyCardFromBoard(myCard);
 	else myCard->canAttack = false;
 	if (enemyCard && needToEraseEnemy)
@@ -1146,15 +1128,12 @@ void AttackAction::Perform(ostream& s)
 
 SummonAction::SummonAction(State* state, Card* card) : Action(card->cost, state), summonCard(card) {
 
-
-
-	this->summonCardId = card->instanceId;
 	value += Calculator().CalcCardPower(*card);
 }
 
 void SummonAction::Perform(ostream& s)
 {
-	s << "SUMMON " << summonCardId << ";";
+	s << "SUMMON " << summonCard->cardId << ";";
 	m_State->players[Me].SpendMana(summonCard->cost);
 	summonCard->location = Card::Location::OnBoard;
 	if (summonCard->abilities & Card::Abilities::Charge)
@@ -1170,11 +1149,6 @@ void SummonAction::Perform(ostream& s)
 }
 
 UseAction::UseAction(State* state, Card* myCard, Card* pTarget) : Action(myCard->cost, state), myCard(myCard), target(pTarget) {
-
-	myCardInstanceID = myCard->instanceId;
-	enemyCardInstanceID = -1;
-	if (pTarget)
-		enemyCardInstanceID = pTarget->instanceId;
 
 	if (!target) {
 		value = 0.f;
@@ -1226,8 +1200,9 @@ UseAction::UseAction(State* state, Card* myCard, Card* pTarget) : Action(myCard-
 
 void UseAction::Perform(ostream& s)
 {
-
-	s << "USE " << myCardInstanceID << " " << enemyCardInstanceID << ";";
+	assert(myCard);
+	assert(target);
+	s << "USE " << myCard->instanceId << " " << target->instanceId << ";";
 	if (myCard)
 		m_State->RemoveMyCardFromHand(this->myCard);
 	if (target) {
@@ -1352,7 +1327,7 @@ void PickAction::Perform(ostream& s)
 
 int main()
 {
-	/*turnStartPoint = high_resolution_clock::now();
+	turnStartPoint = high_resolution_clock::now();
 	BitStream bs;
 	bs.initRead("B62145O70GAN3X51C00_7r8P0J6000vM400003yS0a228000hnf0WX0028");
 	State s;
@@ -1361,7 +1336,7 @@ int main()
 	a.ChangeState(s);
 	a.Think();
 	high_resolution_clock::time_point turnEnd = high_resolution_clock::now();
-	cerr << "Turn time " << duration_cast<milliseconds>(turnEnd - turnStartPoint).count() << '\n';*/
+	cerr << "Turn time " << duration_cast<milliseconds>(turnEnd - turnStartPoint).count() << '\n';
 
 
 	while (1) {

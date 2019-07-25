@@ -175,7 +175,7 @@ struct Card {
 	bool canAttack = false;
 	string ToString() const;
 	void read(BitStream& bs);
-	void write(BitStream& bs);
+	void write(BitStream& bs) const;
 
 };
 void Card::read(BitStream& bs) {
@@ -211,7 +211,7 @@ void Card::read(BitStream& bs) {
 	canAttack = bs.readBit();
 
 }
-void Card::write(BitStream& bs) {
+void Card::write(BitStream& bs) const{
 
 	bs.writeInt(cardId, 6);
 	bs.writeInt(instanceId, 6);
@@ -238,7 +238,7 @@ enum {
 	Opponent = 1
 };
 class State;
-class ComplicatedAction;
+
 class Action {
 protected:
 	State* m_State;
@@ -254,18 +254,18 @@ public:
 	int GetValue() const { return value; }
 	virtual void Perform(ostream& s) = 0;
 	friend class State;
-	virtual bool IsEqual(Action& another) = 0;
+	virtual bool IsEqual(const Action& another) const = 0;
 	//virtual ~Action() {};
 };
 
-class ComplicatedAction :public Action {
+class ComplicatedAction final :public Action {
 	vector<Action* > subActions;
 public:
 	ComplicatedAction(State* state, Action* first, Action* second);
-	virtual void Perform(ostream& s)  override;
+	virtual void Perform(ostream& s)  override final;
 
 	const vector<Action*>& GetSubs() const { return subActions; }
-	virtual bool IsEqual(Action& another) override {
+	virtual bool IsEqual(const Action& another) const override  final {
 		for (auto& action : subActions) {
 			if (action->IsEqual(another))
 				return true;
@@ -274,19 +274,19 @@ public:
 	}
 };
 
-class SummonAction : public Action {
+class SummonAction final : public Action {
 private:
 	Card* summonCard = nullptr;
 
 public:
 	friend class State;
 	SummonAction(State* state, Card* card);
-	virtual void Perform(ostream& s)  override;
-	virtual bool IsEqual(Action& another) override {
-		if (SummonAction * castedToSummon = dynamic_cast<SummonAction*>(&another)) {
+	virtual void Perform(ostream& s)  override final;
+	virtual bool IsEqual(const Action& another) const override final {
+		if (const SummonAction * castedToSummon = dynamic_cast<const SummonAction*>(&another)) {
 			return this->summonCard == castedToSummon->summonCard;
 		}
-		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
+		else if (const ComplicatedAction * comp = dynamic_cast<const ComplicatedAction*>(&another)) {
 			for (auto& sub : comp->GetSubs()) {
 				if (IsEqual(*sub))
 					return true;
@@ -305,9 +305,9 @@ private:
 	bool needToEraseEnemy = false;
 public:
 	AttackAction(State* state, Card* myCard, Card* enemyCard = nullptr);
-	virtual void Perform(ostream& s) override;
-	virtual bool IsEqual(Action& another) override {
-		if (AttackAction * ac = dynamic_cast<AttackAction*>(&another)) {
+	virtual void Perform(ostream& s) override final;
+	virtual bool IsEqual(const Action& another) const override final {
+		if (const AttackAction * ac = dynamic_cast<const AttackAction*>(&another)) {
 			if (myCard == ac->myCard)
 				return true;
 			if (ac->enemyCard == enemyCard)
@@ -315,7 +315,7 @@ public:
 					return true;
 			return false;
 		}
-		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
+		else if (const ComplicatedAction * comp = dynamic_cast<const ComplicatedAction*>(&another)) {
 			for (auto& kek : comp->GetSubs()) {
 				if (IsEqual(*kek))
 					return true;
@@ -326,17 +326,17 @@ public:
 	friend ComplicatedAction;
 };
 
-class PickAction : public Action {
+class PickAction final : public Action {
 	int cardNum = -1;
 public:
 	PickAction(int cardNumber) :Action(0, nullptr), cardNum(cardNumber) {}
 	virtual void Perform(ostream& s) override;
-	virtual bool IsEqual(Action& another) override { 
+	virtual bool IsEqual(const Action& another) const override final { 
 		assert(false);
 		return false; }
 };
 
-class UseAction : public Action {
+class UseAction final : public Action {
 private:
 	Card* myCard;
 	Card* target;
@@ -345,11 +345,11 @@ private:
 public:
 	UseAction(State* state, Card* myCard, Card* enemyCard = nullptr);
 	virtual void Perform(ostream& s) override;
-	virtual bool IsEqual(Action& another) override {
-		if (UseAction * ac = dynamic_cast<UseAction*>(&another)) {
+	virtual bool IsEqual(const Action& another)const override final{
+		if (const UseAction * ac = dynamic_cast<const UseAction*>(&another)) {
 			return this->myCard == ac->myCard;
 		}
-		else if (ComplicatedAction * comp = dynamic_cast<ComplicatedAction*>(&another)) {
+		else if (const ComplicatedAction * comp = dynamic_cast<const ComplicatedAction*>(&another)) {
 			for (auto& sub : comp->GetSubs()) {
 				if (IsEqual(*sub))
 					return true;
@@ -365,7 +365,7 @@ class PassAction : public Action {
 public:
 	PassAction() :Action(0, nullptr) {};
 	virtual void Perform(ostream& s) override;
-	virtual bool IsEqual(Action& another) override { return false; }
+	virtual bool IsEqual(const Action& another) const override { return false; }
 };
 
 
@@ -421,7 +421,7 @@ public:
 	Player(istream& i);
 	Player() = default;
 	void read(BitStream& bs);
-	void write(BitStream& bs);
+	void write(BitStream& bs) const;
 
 };
 void Player::read(BitStream& bs) {
@@ -433,7 +433,7 @@ void Player::read(BitStream& bs) {
 	draw = bs.readInt(3);
 
 }
-void Player::write(BitStream& bs) {
+void Player::write(BitStream& bs) const {
 	bs.writeInt(health, 7);
 	bs.writeInt(mana, 4);
 	bs.writeInt(deckCardsAmount, 6);
@@ -453,8 +453,9 @@ class State {
 	list<Card> myBoard;
 	list<Card> enemyBoard;
 
+	GameState state;
 
-	int CardsCount;
+	int CardsCount = -1;
 public:
 	inline GameState GetState() const { return state; }
 	vector<Action*> GetAllPosibleActions();
@@ -466,10 +467,9 @@ public:
 	inline int GetCurrMana() const { return players[Me].GetMana(); }
 	inline const list<Card>& GetMyHand() const { return myHand; }
 	void read(BitStream& s);
-	void write(BitStream& s);
+	void write(BitStream& s) const;
 	vector<Action*> CheckLetal();
-	GameState state;
-
+	
 	bool HaveWeCharge();
 	State(istream& i);
 	State() = default;
@@ -736,7 +736,7 @@ void State::read(BitStream& s) {
 
 
 }
-void State::write(BitStream& s) {
+void State::write(BitStream& s) const {
 	for (int i = 0; i < 2; ++i)
 		players[i].write(s);
 	s.writeInt(CardsCount, 8);
@@ -979,7 +979,7 @@ Agent::Agent(istream& a) : m_State(a)
 
 void Agent::Think()
 {
-	if (m_State.state == GameState::DRAFT) {
+	if (m_State.GetState() == GameState::DRAFT) {
 
 		Draft();
 		cout << '\n';
@@ -1327,7 +1327,7 @@ void PickAction::Perform(ostream& s)
 
 int main()
 {
-	turnStartPoint = high_resolution_clock::now();
+	/*turnStartPoint = high_resolution_clock::now();
 	BitStream bs;
 	bs.initRead("B62145O70GAN3X51C00_7r8P0J6000vM400003yS0a228000hnf0WX0028");
 	State s;
@@ -1336,7 +1336,7 @@ int main()
 	a.ChangeState(s);
 	a.Think();
 	high_resolution_clock::time_point turnEnd = high_resolution_clock::now();
-	cerr << "Turn time " << duration_cast<milliseconds>(turnEnd - turnStartPoint).count() << '\n';
+	cerr << "Turn time " << duration_cast<milliseconds>(turnEnd - turnStartPoint).count() << '\n';*/
 
 
 	while (1) {
